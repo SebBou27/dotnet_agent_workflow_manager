@@ -84,7 +84,7 @@ public sealed class AgentWorkflowManager
                 }
 
                 var context = new ToolInvocationContext(toolCall, CallAgentAsync);
-                return tool.InvokeAsync(context, cancellationToken);
+                return InvokeToolSafeAsync(tool, context, cancellationToken);
             }).ToList();
 
             var toolResults = await Task.WhenAll(toolInvocationTasks).ConfigureAwait(false);
@@ -112,6 +112,22 @@ public sealed class AgentWorkflowManager
 
     private Task<AgentWorkflowResult> CallAgentAsync(string agentName, AgentRequest request, CancellationToken cancellationToken)
         => RunAgentAsync(agentName, request, cancellationToken);
+
+    private static async Task<AgentToolExecutionResult> InvokeToolSafeAsync(IAgentTool tool, ToolInvocationContext context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await tool.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            var message = ex is InvalidOperationException or ArgumentException
+                ? ex.Message
+                : $"Tool '{tool.Name}' failed: {ex.Message}";
+
+            return new AgentToolExecutionResult(context.ToolCall.CallId, message, isError: true);
+        }
+    }
 }
 
 public interface IToolAwareAgent

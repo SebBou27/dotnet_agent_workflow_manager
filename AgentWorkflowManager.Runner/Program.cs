@@ -19,22 +19,44 @@ try
     var manager = new WorkflowManager();
     manager.RegisterAgent(agent);
 
-    var request = new AgentRequest(new[]
-    {
-        AgentMessage.FromText("user", "Dis bonjour, puis donne-moi un conseil productif en deux phrases."),
-    });
+    var session = new AgentSession(manager, "nano-runner");
 
-    var result = await manager.RunAgentAsync("nano-runner", request);
+    Console.WriteLine("Session ouverte avec l'agent gpt-5-nano. Entrée vide pour quitter.");
 
-    if (result.FinalMessage is null)
+    while (true)
     {
-        Console.WriteLine("L'agent n'a pas renvoyé de message final.");
-        return;
-    }
+        Console.Write("Vous: ");
+        var input = Console.ReadLine();
 
-    foreach (var content in result.FinalMessage.Content.OfType<AgentTextContent>())
-    {
-        Console.WriteLine(content.Text);
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            Console.WriteLine("Fin de la session.");
+            break;
+        }
+
+        var result = await session.SendAsync(input);
+        var reply = session.GetLatestAssistantText();
+
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            Console.WriteLine("(Pas de réponse)");
+            continue;
+        }
+
+        Console.WriteLine($"Agent: {reply}");
+
+        if (result.Conversation.Any(message => message.Role == "tool"))
+        {
+            foreach (var toolMessage in result.Conversation.Where(m => m.Role == "tool"))
+            {
+                var toolContent = toolMessage.Content.OfType<AgentToolResultContent>().FirstOrDefault();
+                if (toolContent is not null)
+                {
+                    var status = toolContent.IsError ? "erreur outil" : "outil";
+                    Console.WriteLine($"[{status}] {toolContent.Output}");
+                }
+            }
+        }
     }
 }
 catch (Exception ex)
