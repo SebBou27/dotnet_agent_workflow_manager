@@ -14,8 +14,9 @@ public sealed class AgentWorkflowManager
     private readonly Dictionary<string, IAgent> _agents = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IAgentTool> _tools = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _maxTurns;
+    private readonly AgentRetryPolicy _retryPolicy;
 
-    public AgentWorkflowManager(int maxTurns = 8)
+    public AgentWorkflowManager(int maxTurns = 8, AgentRetryPolicy? retryPolicy = null)
     {
         if (maxTurns <= 0)
         {
@@ -23,6 +24,7 @@ public sealed class AgentWorkflowManager
         }
 
         _maxTurns = maxTurns;
+        _retryPolicy = retryPolicy ?? AgentRetryPolicy.Default;
     }
 
     public void RegisterAgent(IAgent agent)
@@ -64,7 +66,7 @@ public sealed class AgentWorkflowManager
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var runResult = await agent.GenerateAsync(conversation, availableTools, cancellationToken).ConfigureAwait(false);
+            var runResult = await ExecuteWithRetryAsync(agent, conversation, availableTools, cancellationToken).ConfigureAwait(false);
 
             if (runResult.AssistantMessage is not null)
             {
@@ -112,6 +114,44 @@ public sealed class AgentWorkflowManager
 
     private Task<AgentWorkflowResult> CallAgentAsync(string agentName, AgentRequest request, CancellationToken cancellationToken)
         => RunAgentAsync(agentName, request, cancellationToken);
+
+    private async Task<AgentRunResult> ExecuteWithRetryAsync(IAgent agent, IReadOnlyList<AgentMessage> conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= _retryPolicy.MaxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (attempt > 1 && _retryPolicy.DelayBetweenAttempts > TimeSpan.Zero)
+                {
+                    await Task.Delay(_retryPolicy.DelayBetweenAttempts, cancellationToken).ConfigureAwait(false);
+                }
+
+                return await agent.GenerateAsync(conversation, tools, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (_retryPolicy.ShouldRetryOn(ex))
+            {
+                lastException = ex;
+            }
+        }
+
+        if (lastException is null)
+        {
+            throw new InvalidOperationException("Agent execution failed without an exception.");
+        }
+
+        var errorMessage = new AgentMessage(
+            "assistant",
+            new AgentContent[]
+            {
+                new AgentTextContent($"Erreur: l'agent '{agent.Descriptor.Name}' a échoué après {_retryPolicy.MaxAttempts} tentatives. Détails: {lastException.Message}"),
+            });
+
+        return new AgentRunResult(errorMessage, Array.Empty<AgentToolCall>());
+    }
 
     private static async Task<AgentToolExecutionResult> InvokeToolSafeAsync(IAgentTool tool, ToolInvocationContext context, CancellationToken cancellationToken)
     {
