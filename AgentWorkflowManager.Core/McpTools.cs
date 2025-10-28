@@ -129,11 +129,17 @@ public sealed class McpAgentTool : IAgentTool
     {
         try
         {
+            if (context.ToolCall.Arguments.RootElement.ValueKind != JsonValueKind.Undefined)
+            {
+                Console.WriteLine($"[MCP] Invoking tool '{Name}' with arguments: {context.ToolCall.Arguments.RootElement.GetRawText()}");
+            }
+
             var output = await _client.InvokeAsync(_descriptor, context.ToolCall.Arguments, cancellationToken).ConfigureAwait(false);
             return new AgentToolExecutionResult(context.ToolCall.CallId, output);
         }
         catch (Exception ex)
         {
+            Console.Error.WriteLine($"[MCP] Tool '{Name}' failed: {ex}");
             var message = $"MCP tool '{Name}' failed: {ex.Message}";
             return new AgentToolExecutionResult(context.ToolCall.CallId, message, isError: true);
         }
