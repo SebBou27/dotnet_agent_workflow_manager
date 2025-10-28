@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using AgentWorkflowManager.Core;
 using WorkflowManager = AgentWorkflowManager.Core.AgentWorkflowManager;
 
+var singlePrompt = GetSinglePrompt(args);
+
 try
 {
     // Optional: direct MCP test mode without going through the LLM.
@@ -55,6 +57,13 @@ try
     try
     {
         var session = new AgentSession(manager, "nano-runner");
+
+        if (!string.IsNullOrEmpty(singlePrompt))
+        {
+            await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
+            return;
+        }
+
         Console.WriteLine("Session ouverte avec l'agent gpt-5-nano. Entrée vide pour quitter.");
 
         while (true)
@@ -68,29 +77,7 @@ try
                 break;
             }
 
-            var result = await session.SendAsync(input).ConfigureAwait(false);
-            var reply = session.GetLatestAssistantText();
-
-            if (string.IsNullOrWhiteSpace(reply))
-            {
-                Console.WriteLine("(Pas de réponse)");
-                continue;
-            }
-
-            Console.WriteLine($"Agent: {reply}");
-
-            if (result.Conversation.Any(message => message.Role == "tool"))
-            {
-                foreach (var toolMessage in result.Conversation.Where(m => m.Role == "tool"))
-                {
-                    var toolContent = toolMessage.Content.OfType<AgentToolResultContent>().FirstOrDefault();
-                    if (toolContent is not null)
-                    {
-                        var status = toolContent.IsError ? "erreur outil" : "outil";
-                        Console.WriteLine($"[{status}] {toolContent.Output}");
-                    }
-                }
-            }
+            await RunSinglePromptAsync(session, input).ConfigureAwait(false);
         }
     }
     finally
@@ -158,6 +145,56 @@ static string? ResolveMcpConfigPath()
         }
 
         directory = directory.Parent;
+    }
+
+    return null;
+}
+
+static async Task RunSinglePromptAsync(AgentSession session, string prompt)
+{
+    var result = await session.SendAsync(prompt).ConfigureAwait(false);
+    var reply = session.GetLatestAssistantText();
+
+    if (!string.IsNullOrWhiteSpace(reply))
+    {
+        Console.WriteLine($"Agent: {reply}");
+    }
+    else
+    {
+        Console.WriteLine("(Pas de réponse)");
+    }
+
+    if (result.Conversation.Any(message => message.Role == "tool"))
+    {
+        foreach (var toolMessage in result.Conversation.Where(m => m.Role == "tool"))
+        {
+            var toolContent = toolMessage.Content.OfType<AgentToolResultContent>().FirstOrDefault();
+            if (toolContent is not null)
+            {
+                var status = toolContent.IsError ? "erreur outil" : "outil";
+                Console.WriteLine($"[{status}] {toolContent.Output}");
+            }
+        }
+    }
+}
+
+static string? GetSinglePrompt(string[] args)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+
+        if (arg.Equals("--prompt", StringComparison.OrdinalIgnoreCase))
+        {
+            if (i + 1 < args.Length)
+            {
+                return args[i + 1];
+            }
+        }
+        else if (arg.StartsWith("--prompt=", StringComparison.OrdinalIgnoreCase))
+        {
+            return arg.Substring("--prompt=".Length);
+        }
     }
 
     return null;

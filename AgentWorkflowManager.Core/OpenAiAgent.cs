@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,10 +11,16 @@ namespace AgentWorkflowManager.Core;
 /// <summary>
 /// Agent implementation backed by the OpenAI Responses API.
 /// </summary>
-public sealed class OpenAiAgent : IAgent, IToolAwareAgent
+public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
 {
     private readonly IOpenAiResponseClient _client;
     private readonly HashSet<string> _toolNames;
+    private static readonly JsonSerializerOptions RequestLoggingOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+    private int _attemptNumber = 1;
 
     public OpenAiAgent(OpenAiResponseClient client, AgentDescriptor descriptor, IEnumerable<string>? toolNames = null)
         : this((IOpenAiResponseClient)client, descriptor, toolNames)
@@ -46,6 +53,11 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent
         return GenerateInternalAsync(conversation, tools, cancellationToken);
     }
 
+    public void OnRetryAttempt(int attemptNumber)
+    {
+        _attemptNumber = attemptNumber;
+    }
+
     private async Task<AgentRunResult> GenerateInternalAsync(IReadOnlyList<AgentMessage> conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken cancellationToken)
     {
         var request = new OpenAiResponseRequest
@@ -71,6 +83,17 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent
                     new() { Type = "input_text", Text = Descriptor.SystemPrompt },
                 },
             });
+        }
+
+        if (_attemptNumber <= 1)
+        {
+            var serializedRequest = JsonSerializer.Serialize(request, RequestLoggingOptions);
+            Console.WriteLine("[OpenAI] Sending request payload (attempt #1):");
+            Console.WriteLine(serializedRequest);
+        }
+        else
+        {
+            Console.WriteLine($"[OpenAI] Retry attempt #{_attemptNumber}: reusing request payload from attempt #1.");
         }
 
         var response = await _client.CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);

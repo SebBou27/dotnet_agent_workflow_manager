@@ -125,6 +125,11 @@ public sealed class AgentWorkflowManager
 
             try
             {
+                if (agent is IRetryAwareAgent retryAwareAgent)
+                {
+                    retryAwareAgent.OnRetryAttempt(attempt);
+                }
+
                 if (attempt > 1 && _retryPolicy.DelayBetweenAttempts > TimeSpan.Zero)
                 {
                     await Task.Delay(_retryPolicy.DelayBetweenAttempts, cancellationToken).ConfigureAwait(false);
@@ -173,4 +178,9 @@ public sealed class AgentWorkflowManager
 public interface IToolAwareAgent
 {
     IReadOnlyCollection<string> ToolNames { get; }
+}
+
+public interface IRetryAwareAgent
+{
+    void OnRetryAttempt(int attemptNumber);
 }
