@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -19,7 +19,7 @@ try
 
         if (!McpToolConfigLoader.TryLoadFromFile(configPath, out var descriptors) || descriptors.Count == 0)
         {
-            Console.Error.WriteLine("Aucun outil MCP configuré pour MCP_DIRECT_TEST");
+            Console.Error.WriteLine("Aucun outil MCP configurÃ© pour MCP_DIRECT_TEST");
             return;
         }
 
@@ -55,7 +55,7 @@ try
     try
     {
         var session = new AgentSession(manager, "nano-runner");
-        Console.WriteLine("Session ouverte avec l'agent gpt-5-nano. Entrée vide pour quitter.");
+        Console.WriteLine("Session ouverte avec l'agent gpt-5-nano. EntrÃ©e vide pour quitter.");
 
         while (true)
         {
@@ -73,7 +73,7 @@ try
 
             if (string.IsNullOrWhiteSpace(reply))
             {
-                Console.WriteLine("(Pas de réponse)");
+                Console.WriteLine("(Pas de rÃ©ponse)");
                 continue;
             }
 
@@ -103,24 +103,24 @@ try
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"Erreur lors de l'exécution du workflow : {ex.Message}");
+    Console.Error.WriteLine($"Erreur lors de l'exÃ©cution du workflow : {ex.Message}");
     if (ex.InnerException is not null)
     {
         Console.Error.WriteLine(ex.InnerException);
     }
 }
 
-static async Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
+static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
 {
     var configPath = ResolveMcpConfigPath();
     if (configPath is null)
     {
-        return null;
+        return Task.FromResult<IAsyncDisposable?>(null);
     }
 
     if (!McpToolConfigLoader.TryLoadFromFile(configPath, out var descriptors))
     {
-        return null;
+        return Task.FromResult<IAsyncDisposable?>(null);
     }
 
     Console.WriteLine($"Chargement de {descriptors.Count} outils MCP depuis {configPath}.");
@@ -132,7 +132,7 @@ static async Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowMana
         manager.RegisterTool(new McpAgentTool(descriptor, client));
     }
 
-    return client;
+    return Task.FromResult<IAsyncDisposable?>(client);
 }
 
 static string? ResolveMcpConfigPath()
