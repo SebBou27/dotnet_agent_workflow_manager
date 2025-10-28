@@ -54,3 +54,4 @@ TestResult.xml
 nunit-*.xml
 # Local environment variables
 .env
+mcp.tools.json

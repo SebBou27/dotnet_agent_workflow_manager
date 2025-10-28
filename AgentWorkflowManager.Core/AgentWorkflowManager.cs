@@ -147,7 +147,7 @@ public sealed class AgentWorkflowManager
             "assistant",
             new AgentContent[]
             {
-                new AgentTextContent($"Erreur: l'agent '{agent.Descriptor.Name}' a échoué après {_retryPolicy.MaxAttempts} tentatives. Détails: {lastException.Message}"),
+                new AgentTextContent($"Error: agent '{agent.Descriptor.Name}' failed after {_retryPolicy.MaxAttempts} attempts. Details: {lastException.Message}"),
             });
 
         return new AgentRunResult(errorMessage, Array.Empty<AgentToolCall>());

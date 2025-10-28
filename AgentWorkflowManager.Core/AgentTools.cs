@@ -39,6 +39,9 @@ public sealed class ToolDefinition
     internal OpenAiToolDefinition ToOpenAiDefinition()
         => new()
         {
+            Name = Name,
+            Description = Description,
+            InputSchema = ParametersSchema,
             Function = new OpenAiFunctionDefinition
             {
                 Name = Name,

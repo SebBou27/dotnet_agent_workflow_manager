@@ -1,0 +1,55 @@
+{
+  "tools": [
+    {
+      "name": "spreadsheet_reader",
+      "description": "Analyse un fichier Excel via MCP.",
+      "server": "spreadsheet-service",
+      "transport": "http",
+      "endpoint": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ENV:MCP_TOKEN}"
+      },
+      "command": "excel.read",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Chemin vers le fichier Excel."
+          },
+          "sheet": {
+            "type": "string",
+            "description": "Nom de l'onglet à analyser."
+          }
+        },
+        "required": [
+          "file_path",
+          "sheet"
+        ]
+      }
+    },
+    {
+      "name": "sql_query_runner",
+      "description": "Exécute une requête SQL via MCP.",
+      "server": "database-service",
+      "command": "sql.query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "string",
+            "description": "Identifiant de connexion MCP."
+          },
+          "query": {
+            "type": "string",
+            "description": "Requête SQL à exécuter."
+          }
+        },
+        "required": [
+          "connection",
+          "query"
+        ]
+      }
+    }
+  ]
+}

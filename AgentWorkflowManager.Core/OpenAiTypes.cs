@@ -76,11 +76,20 @@ internal sealed class OpenAiInputContent
 
 internal sealed class OpenAiToolDefinition
 {
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+
     [JsonPropertyName("type")]
     public string Type { get; init; } = "function";
 
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("input_schema")]
+    public JsonNode? InputSchema { get; init; }
+
     [JsonPropertyName("function")]
-    public required OpenAiFunctionDefinition Function { get; init; }
+    public OpenAiFunctionDefinition? Function { get; init; }
 }
 
 internal sealed class OpenAiFunctionDefinition

@@ -135,7 +135,7 @@ public sealed class AgentWorkflowManagerTests
         Assert.NotNull(result.FinalMessage);
 
         var textContent = result.FinalMessage!.Content.OfType<AgentTextContent>().Single().Text;
-        Assert.Contains("Erreur", textContent, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Error", textContent, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("failing", textContent, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(2, result.Conversation.Count); // user + error assistant
     }
