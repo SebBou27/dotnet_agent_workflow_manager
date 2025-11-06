@@ -36,19 +36,23 @@ public sealed class ToolDefinition
 
     public JsonNode ParametersSchema { get; }
 
-    internal OpenAiToolDefinition ToOpenAiDefinition()
-        => new()
+    internal OpenAiToolDefinition ToOpenAiDefinition(string? overrideName = null)
+    {
+        var nameToUse = string.IsNullOrWhiteSpace(overrideName) ? Name : overrideName;
+
+        return new OpenAiToolDefinition
         {
-            Name = Name,
+            Name = nameToUse,
             Description = Description,
             InputSchema = ParametersSchema,
             Function = new OpenAiFunctionDefinition
             {
-                Name = Name,
+                Name = nameToUse,
                 Description = Description,
                 Parameters = ParametersSchema,
             },
         };
+    }
 }
 
 public sealed class ToolInvocationContext

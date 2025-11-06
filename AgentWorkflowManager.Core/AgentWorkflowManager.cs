@@ -162,7 +162,12 @@ public sealed class AgentWorkflowManager
     {
         try
         {
-            return await tool.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+            var argumentsJson = context.ToolCall.Arguments.RootElement.GetRawText();
+            Console.WriteLine($"[Tool] Invoking '{tool.Name}' (callId={context.ToolCall.CallId}) with arguments: {argumentsJson}");
+
+            var result = await tool.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
+            Console.WriteLine($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) returned (error={result.IsError}): {result.Output}");
+            return result;
         }
         catch (Exception ex)
         {
@@ -170,6 +175,7 @@ public sealed class AgentWorkflowManager
                 ? ex.Message
                 : $"Tool '{tool.Name}' failed: {ex.Message}";
 
+            Console.Error.WriteLine($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) threw: {ex}");
             return new AgentToolExecutionResult(context.ToolCall.CallId, message, isError: true);
         }
     }

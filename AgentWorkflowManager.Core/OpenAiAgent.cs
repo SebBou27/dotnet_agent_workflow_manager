@@ -15,6 +15,7 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
 {
     private readonly IOpenAiResponseClient _client;
     private readonly HashSet<string> _toolNames;
+    private readonly Dictionary<string, string> _toolNameMap = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions RequestLoggingOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -60,6 +61,9 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
 
     private async Task<AgentRunResult> GenerateInternalAsync(IReadOnlyList<AgentMessage> conversation, IReadOnlyList<ToolDefinition> tools, CancellationToken cancellationToken)
     {
+        _toolNameMap.Clear();
+        var openAiTools = tools.Count > 0 ? SanitizeTools(tools) : null;
+
         var request = new OpenAiResponseRequest
         {
             Model = Descriptor.Model,
@@ -68,7 +72,7 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
             Temperature = Descriptor.Temperature,
             TopP = Descriptor.TopP,
             MaxOutputTokens = Descriptor.MaxOutputTokens,
-            Tools = tools.Count > 0 ? tools.Select(t => t.ToOpenAiDefinition()).ToList() : null,
+            Tools = openAiTools,
             Reasoning = Descriptor.ReasoningEffort is null ? null : new OpenAiReasoningOptions { Effort = Descriptor.ReasoningEffort },
             Text = Descriptor.Verbosity is null ? null : new OpenAiTextOptions { Verbosity = Descriptor.Verbosity },
         };
@@ -90,6 +94,16 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
             var serializedRequest = JsonSerializer.Serialize(request, RequestLoggingOptions);
             Console.WriteLine("[OpenAI] Sending request payload (attempt #1):");
             Console.WriteLine(serializedRequest);
+
+            var renamedTools = _toolNameMap.Where(kvp => !string.Equals(kvp.Key, kvp.Value, StringComparison.Ordinal)).ToList();
+            if (renamedTools.Count > 0)
+            {
+                Console.WriteLine("[OpenAI] Tool name mapping (sanitized -> original):");
+                foreach (var mapping in renamedTools)
+                {
+                    Console.WriteLine($" - {mapping.Key} => {mapping.Value}");
+                }
+            }
         }
         else
         {
@@ -97,7 +111,59 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         }
 
         var response = await _client.CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);
+        var serializedResponse = JsonSerializer.Serialize(response, RequestLoggingOptions);
+        Console.WriteLine("[OpenAI] Received response envelope:");
+        Console.WriteLine(serializedResponse);
         return TranslateResponse(response);
+    }
+
+    private List<OpenAiToolDefinition> SanitizeTools(IReadOnlyList<ToolDefinition> tools)
+    {
+        var sanitizedDefinitions = new List<OpenAiToolDefinition>(tools.Count);
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tool in tools)
+        {
+            var sanitizedName = SanitizeToolName(tool.Name);
+            sanitizedName = EnsureUniqueName(sanitizedName, usedNames);
+
+            _toolNameMap[sanitizedName] = tool.Name;
+            sanitizedDefinitions.Add(tool.ToOpenAiDefinition(sanitizedName));
+        }
+
+        return sanitizedDefinitions;
+    }
+
+    private static string SanitizeToolName(string name)
+    {
+        var buffer = new char[name.Length];
+        var index = 0;
+
+        foreach (var ch in name)
+        {
+            buffer[index++] = char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_';
+        }
+
+        var sanitized = new string(buffer, 0, index);
+        return string.IsNullOrWhiteSpace(sanitized.Replace("_", string.Empty)) ? "tool" : sanitized;
+    }
+
+    private static string EnsureUniqueName(string baseName, HashSet<string> usedNames)
+    {
+        if (usedNames.Add(baseName))
+        {
+            return baseName;
+        }
+
+        var suffix = 2;
+        string candidate;
+        do
+        {
+            candidate = $"{baseName}_{suffix}";
+            suffix++;
+        } while (!usedNames.Add(candidate));
+
+        return candidate;
     }
 
     private static List<OpenAiInputMessage> BuildInput(IReadOnlyList<AgentMessage> conversation)
@@ -131,7 +197,7 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
             _ => throw new NotSupportedException($"Content type '{content.GetType().Name}' is not supported."),
         };
 
-    private static AgentRunResult TranslateResponse(OpenAiResponseEnvelope response)
+    private AgentRunResult TranslateResponse(OpenAiResponseEnvelope response)
     {
         if (response.Output.Count == 0)
         {
@@ -164,7 +230,7 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         return AgentMessage.FromText(message.Role ?? "assistant", combined);
     }
 
-    private static IReadOnlyList<AgentToolCall> ExtractToolCalls(IEnumerable<OpenAiOutputContent> contents)
+    private IReadOnlyList<AgentToolCall> ExtractToolCalls(IEnumerable<OpenAiOutputContent> contents)
     {
         var toolCalls = new List<AgentToolCall>();
 
@@ -180,8 +246,12 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
                 continue;
             }
 
+            var originalName = _toolNameMap.TryGetValue(content.Name, out var mappedName)
+                ? mappedName
+                : content.Name;
+
             var argumentsDocument = ParseArguments(content.Arguments);
-            toolCalls.Add(new AgentToolCall(content.Name, content.CallId, argumentsDocument));
+            toolCalls.Add(new AgentToolCall(originalName, content.CallId, argumentsDocument));
         }
 
         return toolCalls;
