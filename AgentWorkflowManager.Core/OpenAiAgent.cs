@@ -16,6 +16,8 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
     private readonly IOpenAiResponseClient _client;
     private readonly HashSet<string> _toolNames;
     private readonly Dictionary<string, string> _toolNameMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _pendingResponseIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _submittedToolOutputs = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions RequestLoggingOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -64,22 +66,33 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         _toolNameMap.Clear();
         var openAiTools = tools.Count > 0 ? SanitizeTools(tools) : null;
 
-        var request = new OpenAiResponseRequest
+        var (inputItems, toolCallIdsIncluded) = BuildInput(conversation);
+        string? previousResponseId = null;
+
+        if (toolCallIdsIncluded.Count > 0)
         {
-            Model = Descriptor.Model,
-            Instructions = Descriptor.FunctionDescription,
-            Input = BuildInput(conversation),
-            Temperature = Descriptor.Temperature,
-            TopP = Descriptor.TopP,
-            MaxOutputTokens = Descriptor.MaxOutputTokens,
-            Tools = openAiTools,
-            Reasoning = Descriptor.ReasoningEffort is null ? null : new OpenAiReasoningOptions { Effort = Descriptor.ReasoningEffort },
-            Text = Descriptor.Verbosity is null ? null : new OpenAiTextOptions { Verbosity = Descriptor.Verbosity },
-        };
+            var responseIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var callId in toolCallIdsIncluded)
+            {
+                if (!_pendingResponseIds.TryGetValue(callId, out var responseId) || string.IsNullOrWhiteSpace(responseId))
+                {
+                    throw new InvalidOperationException($"No OpenAI response id recorded for tool call '{callId}'.");
+                }
+
+                responseIds.Add(responseId);
+            }
+
+            if (responseIds.Count != 1)
+            {
+                throw new InvalidOperationException("Tool outputs reference multiple response ids, which is not supported.");
+            }
+
+            previousResponseId = responseIds.First();
+        }
 
         if (!string.IsNullOrWhiteSpace(Descriptor.SystemPrompt))
         {
-            request.Input.Insert(0, new OpenAiInputMessage
+            inputItems.Insert(0, new OpenAiMessageInputItem
             {
                 Role = "system",
                 Content = new List<OpenAiInputContent>
@@ -88,6 +101,25 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
                 },
             });
         }
+
+        if (inputItems.Count == 0)
+        {
+            throw new InvalidOperationException("Cannot create OpenAI response without input items.");
+        }
+
+        var request = new OpenAiResponseRequest
+        {
+            Model = Descriptor.Model,
+            Instructions = Descriptor.FunctionDescription,
+            Input = inputItems,
+            PreviousResponseId = previousResponseId,
+            Temperature = Descriptor.Temperature,
+            TopP = Descriptor.TopP,
+            MaxOutputTokens = Descriptor.MaxOutputTokens,
+            Tools = openAiTools,
+            Reasoning = Descriptor.ReasoningEffort is null ? null : new OpenAiReasoningOptions { Effort = Descriptor.ReasoningEffort },
+            Text = Descriptor.Verbosity is null ? null : new OpenAiTextOptions { Verbosity = Descriptor.Verbosity },
+        };
 
         if (_attemptNumber <= 1)
         {
@@ -114,6 +146,12 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         var serializedResponse = JsonSerializer.Serialize(response, RequestLoggingOptions);
         Console.WriteLine("[OpenAI] Received response envelope:");
         Console.WriteLine(serializedResponse);
+        foreach (var callId in toolCallIdsIncluded)
+        {
+            _submittedToolOutputs.Add(callId);
+            _pendingResponseIds.Remove(callId);
+        }
+
         return TranslateResponse(response);
     }
 
@@ -166,17 +204,58 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         return candidate;
     }
 
-    private static List<OpenAiInputMessage> BuildInput(IReadOnlyList<AgentMessage> conversation)
+    private (List<OpenAiInputItem> InputItems, List<string> ToolCallIds) BuildInput(IReadOnlyList<AgentMessage> conversation)
     {
-        var inputMessages = new List<OpenAiInputMessage>(conversation.Count);
+        var inputItems = new List<OpenAiInputItem>(conversation.Count);
+        var toolCallIds = new List<string>();
+
+        void AppendToolOutputs(IEnumerable<AgentToolResultContent> toolResults)
+        {
+            foreach (var result in toolResults)
+            {
+                if (_submittedToolOutputs.Contains(result.ToolCallId))
+                {
+                    continue;
+                }
+
+                inputItems.Add(new OpenAiFunctionCallOutputItem
+                {
+                    CallId = result.ToolCallId,
+                    Output = result.Output,
+                });
+                toolCallIds.Add(result.ToolCallId);
+            }
+        }
 
         foreach (var message in conversation)
         {
-            var content = message.Content.Select(ConvertContent).ToList();
-            inputMessages.Add(new OpenAiInputMessage { Role = message.Role, Content = content });
+            if (string.Equals(message.Role, "tool", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendToolOutputs(message.Content.OfType<AgentToolResultContent>());
+                continue;
+            }
+
+            var contentItems = new List<OpenAiInputContent>();
+            foreach (var content in message.Content)
+            {
+                if (content is AgentToolResultContent toolResultContent)
+                {
+                    AppendToolOutputs(new[] { toolResultContent });
+                    continue;
+                }
+
+                contentItems.Add(ConvertContent(content));
+            }
+
+            if (contentItems.Count == 0)
+            {
+                continue;
+            }
+
+            inputItems.Add(new OpenAiMessageInputItem { Role = NormalizeRole(message.Role), Content = contentItems });
         }
 
-        return inputMessages;
+        return (inputItems, toolCallIds);
     }
 
     private static OpenAiInputContent ConvertContent(AgentContent content)
@@ -187,13 +266,7 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
                 Type = "input_text",
                 Text = text.Text,
             },
-            AgentToolResultContent toolResult => new OpenAiInputContent
-            {
-                Type = "tool_result",
-                ToolCallId = toolResult.ToolCallId,
-                Output = toolResult.Output,
-                IsError = toolResult.IsError,
-            },
+            AgentToolResultContent => throw new InvalidOperationException("Tool result content must be provided via function_call_output items."),
             _ => throw new NotSupportedException($"Content type '{content.GetType().Name}' is not supported."),
         };
 
@@ -204,11 +277,32 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
             return new AgentRunResult(null, Array.Empty<AgentToolCall>());
         }
 
-        var primaryMessage = response.Output.FirstOrDefault(output => string.Equals(output.Role, "assistant", StringComparison.OrdinalIgnoreCase))
-            ?? response.Output[0];
+        AgentMessage? assistantMessage = null;
+        var toolCalls = new List<AgentToolCall>();
 
-        var assistantMessage = ConvertOutputToAgentMessage(primaryMessage);
-        var toolCalls = ExtractToolCalls(primaryMessage.Content);
+        foreach (var output in response.Output)
+        {
+            var type = output.Type ?? string.Empty;
+
+            if (string.Equals(type, "message", StringComparison.OrdinalIgnoreCase))
+            {
+                assistantMessage ??= ConvertOutputToAgentMessage(output);
+                var messageToolCalls = ExtractToolCalls(output.Content, response.Id);
+                if (messageToolCalls.Count > 0)
+                {
+                    toolCalls.AddRange(messageToolCalls);
+                }
+            }
+            else if (string.Equals(type, "function_call", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(type, "tool_call", StringComparison.OrdinalIgnoreCase))
+            {
+                var toolCall = ConvertFunctionCall(output, response.Id);
+                if (toolCall is not null)
+                {
+                    toolCalls.Add(toolCall);
+                }
+            }
+        }
 
         return new AgentRunResult(assistantMessage, toolCalls);
     }
@@ -230,7 +324,35 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         return AgentMessage.FromText(message.Role ?? "assistant", combined);
     }
 
-    private IReadOnlyList<AgentToolCall> ExtractToolCalls(IEnumerable<OpenAiOutputContent> contents)
+    private AgentToolCall? ConvertFunctionCall(OpenAiOutputMessage output, string? responseId)
+    {
+        if (string.IsNullOrWhiteSpace(output.Name))
+        {
+            return null;
+        }
+
+        var callId = !string.IsNullOrWhiteSpace(output.CallId)
+            ? output.CallId
+            : !string.IsNullOrWhiteSpace(output.Id)
+                ? output.Id!
+                : Guid.NewGuid().ToString("N");
+
+        var originalName = _toolNameMap.TryGetValue(output.Name, out var mappedName)
+            ? mappedName
+            : output.Name;
+
+        var argumentsDocument = ParseArguments(output.Arguments);
+        var toolCall = new AgentToolCall(originalName, callId, argumentsDocument);
+
+        if (!string.IsNullOrWhiteSpace(responseId))
+        {
+            _pendingResponseIds[callId] = responseId;
+        }
+
+        return toolCall;
+    }
+
+    private IReadOnlyList<AgentToolCall> ExtractToolCalls(IEnumerable<OpenAiOutputContent> contents, string? responseId)
     {
         var toolCalls = new List<AgentToolCall>();
 
@@ -251,7 +373,13 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
                 : content.Name;
 
             var argumentsDocument = ParseArguments(content.Arguments);
-            toolCalls.Add(new AgentToolCall(originalName, content.CallId, argumentsDocument));
+            var toolCall = new AgentToolCall(originalName, content.CallId, argumentsDocument);
+            if (!string.IsNullOrWhiteSpace(responseId))
+            {
+                _pendingResponseIds[toolCall.CallId] = responseId;
+            }
+
+            toolCalls.Add(toolCall);
         }
 
         return toolCalls;
@@ -271,5 +399,24 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         }
 
         return JsonDocument.Parse(element.Value.GetRawText());
+    }
+
+    private static string NormalizeRole(string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return "user";
+        }
+
+        return role.ToLowerInvariant() switch
+        {
+            "tool" => "assistant",
+            "function" => "assistant",
+            "assistant" => "assistant",
+            "system" => "system",
+            "developer" => "developer",
+            "user" => "user",
+            _ => "user",
+        };
     }
 }

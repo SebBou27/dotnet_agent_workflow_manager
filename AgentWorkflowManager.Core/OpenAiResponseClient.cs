@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -45,6 +46,7 @@ public sealed class OpenAiResponseClient : IOpenAiResponseClient, IDisposable
         };
 
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        httpRequest.Headers.TryAddWithoutValidation("OpenAI-Beta", "responses=v2");
 
         using var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

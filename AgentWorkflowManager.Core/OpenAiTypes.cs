@@ -11,10 +11,13 @@ internal sealed class OpenAiResponseRequest
     public required string Model { get; init; }
 
     [JsonPropertyName("input")]
-    public required List<OpenAiInputMessage> Input { get; init; }
+    public required List<OpenAiInputItem> Input { get; init; }
 
     [JsonPropertyName("instructions")]
     public string? Instructions { get; init; }
+
+    [JsonPropertyName("previous_response_id")]
+    public string? PreviousResponseId { get; init; }
 
     [JsonPropertyName("temperature")]
     public double? Temperature { get; init; }
@@ -47,13 +50,27 @@ internal sealed class OpenAiTextOptions
     public string? Verbosity { get; init; }
 }
 
-internal sealed class OpenAiInputMessage
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(OpenAiMessageInputItem), "message")]
+[JsonDerivedType(typeof(OpenAiFunctionCallOutputItem), "function_call_output")]
+internal abstract class OpenAiInputItem;
+
+internal sealed class OpenAiMessageInputItem : OpenAiInputItem
 {
     [JsonPropertyName("role")]
     public required string Role { get; init; }
 
     [JsonPropertyName("content")]
     public required List<OpenAiInputContent> Content { get; init; }
+}
+
+internal sealed class OpenAiFunctionCallOutputItem : OpenAiInputItem
+{
+    [JsonPropertyName("call_id")]
+    public required string CallId { get; init; }
+
+    [JsonPropertyName("output")]
+    public required string Output { get; init; }
 }
 
 internal sealed class OpenAiInputContent
@@ -118,8 +135,20 @@ internal sealed class OpenAiOutputMessage
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
     [JsonPropertyName("role")]
     public string? Role { get; init; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+
+    [JsonPropertyName("call_id")]
+    public string? CallId { get; init; }
+
+    [JsonPropertyName("arguments")]
+    public JsonElement? Arguments { get; init; }
 
     [JsonPropertyName("content")]
     public List<OpenAiOutputContent> Content { get; init; } = new();

@@ -31,8 +31,9 @@ public sealed class OpenAiAgentTests
         Assert.Equal(descriptor.FunctionDescription, request.Instructions);
         Assert.Equal("minimal", request.Reasoning?.Effort);
         Assert.Equal("low", request.Text?.Verbosity);
-        Assert.Equal("input_text", request.Input.Last().Content.Single().Type);
-        Assert.Equal("Say hi", request.Input.Last().Content.Single().Text);
+        var messageItem = Assert.IsType<OpenAiMessageInputItem>(request.Input.Last());
+        Assert.Equal("input_text", messageItem.Content.Single().Type);
+        Assert.Equal("Say hi", messageItem.Content.Single().Text);
     }
 
     [Fact]
@@ -74,10 +75,12 @@ public sealed class OpenAiAgentTests
     private static OpenAiResponseEnvelope CreateTextResponse(string text)
         => new()
         {
+            Id = "resp_text",
             Output =
             {
                 new OpenAiOutputMessage
                 {
+                    Type = "message",
                     Role = "assistant",
                     Content =
                     {
@@ -94,21 +97,15 @@ public sealed class OpenAiAgentTests
 
         return new OpenAiResponseEnvelope
         {
+            Id = $"resp_tool_{callId}",
             Output =
             {
                 new OpenAiOutputMessage
                 {
-                    Role = "assistant",
-                    Content =
-                    {
-                        new OpenAiOutputContent
-                        {
-                            Type = "tool_call",
-                            Name = toolName,
-                            CallId = callId,
-                            Arguments = cloned,
-                        },
-                    },
+                    Type = "function_call",
+                    Name = toolName,
+                    CallId = callId,
+                    Arguments = cloned,
                 },
             },
         };
@@ -124,7 +121,6 @@ public sealed class OpenAiAgentTests
         }
 
         public List<OpenAiResponseRequest> Requests { get; } = new();
-
         public Task<OpenAiResponseEnvelope> CreateResponseAsync(OpenAiResponseRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
