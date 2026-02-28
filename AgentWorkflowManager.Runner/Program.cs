@@ -71,6 +71,25 @@ try
         ExecutorAgentName = executorDescriptor.Name,
     });
 
+    var sessionStore = appOptions.Workflow.SessionMemory.Enabled
+        ? new AgentSessionMemoryStore(appOptions.Workflow.SessionMemory.Directory)
+        : null;
+
+    var sessions = new System.Collections.Generic.Dictionary<string, AgentSession>(StringComparer.OrdinalIgnoreCase);
+
+    AgentSession GetOrCreateSession(string agentName)
+    {
+        if (sessions.TryGetValue(agentName, out var existing))
+        {
+            return existing;
+        }
+
+        var initialConversation = sessionStore?.LoadConversation(agentName);
+        var session = new AgentSession(manager, agentName, initialConversation);
+        sessions[agentName] = session;
+        return session;
+    }
+
     var mcpClient = await RegisterMcpToolsIfPresentAsync(manager).ConfigureAwait(false);
 
     try
@@ -78,9 +97,10 @@ try
         if (!string.IsNullOrEmpty(singlePrompt))
         {
             var target = router.ResolveAgent(singlePrompt);
-            var session = new AgentSession(manager, target);
+            var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
             await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
+            sessionStore?.SaveConversation(target, session.Conversation);
             return;
         }
 
@@ -99,9 +119,10 @@ try
             }
 
             var target = router.ResolveAgent(input);
-            var session = new AgentSession(manager, target);
+            var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
             await RunSinglePromptAsync(session, input).ConfigureAwait(false);
+            sessionStore?.SaveConversation(target, session.Conversation);
         }
     }
     finally
@@ -289,6 +310,7 @@ sealed class WorkflowOptions
     public int MaxTurns { get; init; } = 8;
     public RetryOptions Retry { get; init; } = new();
     public TimeoutOptions Timeouts { get; init; } = new();
+    public SessionMemoryOptions SessionMemory { get; init; } = new();
 }
 
 sealed class RetryOptions
@@ -301,4 +323,10 @@ sealed class TimeoutOptions
 {
     public int AgentSeconds { get; init; } = 90;
     public int ToolSeconds { get; init; } = 45;
+}
+
+sealed class SessionMemoryOptions
+{
+    public bool Enabled { get; init; } = true;
+    public string Directory { get; init; } = ".sessions";
 }

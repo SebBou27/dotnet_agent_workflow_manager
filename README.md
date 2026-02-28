@@ -62,6 +62,19 @@ Exemple config:
 - `AWM_LOG_PAYLOADS` : `true|false` (par défaut recommandé: false)
 - `MCP_DIRECT_TEST=1` : mode test MCP direct
 
+## Mémoire de session (planner/executor)
+Le runner persiste l'historique de conversation par agent dans `./.sessions` (configurable):
+- `AgentWorkflow:Workflow:SessionMemory:Enabled`
+- `AgentWorkflow:Workflow:SessionMemory:Directory`
+
+Exemple:
+```json
+"SessionMemory": {
+  "Enabled": true,
+  "Directory": ".sessions"
+}
+```
+
 ## MCP tools
 1. Copier `mcp.tools.example.json` vers `mcp.tools.json`
 2. Ajuster les endpoints
