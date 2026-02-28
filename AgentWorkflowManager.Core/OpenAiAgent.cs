@@ -124,28 +124,28 @@ public sealed class OpenAiAgent : IAgent, IToolAwareAgent, IRetryAwareAgent
         if (_attemptNumber <= 1)
         {
             var serializedRequest = JsonSerializer.Serialize(request, RequestLoggingOptions);
-            Console.WriteLine("[OpenAI] Sending request payload (attempt #1):");
-            Console.WriteLine(serializedRequest);
+            WorkflowLog.Info("[OpenAI] Sending request payload (attempt #1):");
+            WorkflowLog.Info(WorkflowLog.SafePayload(serializedRequest));
 
             var renamedTools = _toolNameMap.Where(kvp => !string.Equals(kvp.Key, kvp.Value, StringComparison.Ordinal)).ToList();
             if (renamedTools.Count > 0)
             {
-                Console.WriteLine("[OpenAI] Tool name mapping (sanitized -> original):");
+                WorkflowLog.Debug("[OpenAI] Tool name mapping (sanitized -> original):");
                 foreach (var mapping in renamedTools)
                 {
-                    Console.WriteLine($" - {mapping.Key} => {mapping.Value}");
+                    WorkflowLog.Debug($" - {mapping.Key} => {mapping.Value}");
                 }
             }
         }
         else
         {
-            Console.WriteLine($"[OpenAI] Retry attempt #{_attemptNumber}: reusing request payload from attempt #1.");
+            WorkflowLog.Info($"[OpenAI] Retry attempt #{_attemptNumber}: reusing request payload from attempt #1.");
         }
 
         var response = await _client.CreateResponseAsync(request, cancellationToken).ConfigureAwait(false);
         var serializedResponse = JsonSerializer.Serialize(response, RequestLoggingOptions);
-        Console.WriteLine("[OpenAI] Received response envelope:");
-        Console.WriteLine(serializedResponse);
+        WorkflowLog.Info("[OpenAI] Received response envelope:");
+        WorkflowLog.Info(WorkflowLog.SafePayload(serializedResponse));
         foreach (var callId in toolCallIdsIncluded)
         {
             _submittedToolOutputs.Add(callId);

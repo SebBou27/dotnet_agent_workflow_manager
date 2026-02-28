@@ -141,6 +141,33 @@ public sealed class AgentWorkflowManagerTests
     }
 
     [Fact]
+    public async Task RunAgentAsync_ReturnsToolTimeoutError_WhenToolExceedsTimeout()
+    {
+        var manager = new WorkflowManager(
+            maxTurns: 3,
+            runtimeOptions: new WorkflowRuntimeOptions { ToolTimeout = TimeSpan.FromMilliseconds(20), AgentTimeout = TimeSpan.FromSeconds(2) });
+
+        var primaryAgent = new ScriptedAgent(
+            "primary",
+            new[]
+            {
+                AgentRunResultWithTool("assistant", "Calling slow tool", "slow_tool", "call-1", "{}"),
+                AgentRunResultWithMessage("assistant", "Continue after timeout"),
+            });
+
+        manager.RegisterAgent(primaryAgent);
+        manager.RegisterTool(new SlowTestTool("slow_tool", TimeSpan.FromMilliseconds(200)));
+
+        var result = await manager.RunAgentAsync("primary", new AgentRequest(new[] { AgentMessage.FromText("user", "hello") }));
+
+        var toolMessage = result.Conversation.First(message => message.Role == "tool");
+        var toolContent = Assert.IsType<AgentToolResultContent>(toolMessage.Content.Single());
+
+        Assert.True(toolContent.IsError);
+        Assert.Contains("timed out", toolContent.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Workflow_SupportsNestedAgentDelegation()
     {
         var manager = new WorkflowManager(maxTurns: 6);
@@ -296,6 +323,28 @@ public sealed class AgentWorkflowManagerTests
 
         public Task<AgentToolExecutionResult> InvokeAsync(ToolInvocationContext context, CancellationToken cancellationToken)
             => throw new InvalidOperationException("Simulated tool failure.");
+    }
+
+    private sealed class SlowTestTool : IAgentTool
+    {
+        private readonly TimeSpan _delay;
+
+        public SlowTestTool(string name, TimeSpan delay)
+        {
+            Name = name;
+            _delay = delay;
+            Definition = new ToolDefinition(name, "Delayed tool.", JsonNode.Parse("""{"type":"object"}""")!);
+        }
+
+        public string Name { get; }
+
+        public ToolDefinition Definition { get; }
+
+        public async Task<AgentToolExecutionResult> InvokeAsync(ToolInvocationContext context, CancellationToken cancellationToken)
+        {
+            await Task.Delay(_delay, cancellationToken);
+            return new AgentToolExecutionResult(context.ToolCall.CallId, "slow done");
+        }
     }
 
     private sealed class ToolAwareScriptedAgent : IAgent, IToolAwareAgent

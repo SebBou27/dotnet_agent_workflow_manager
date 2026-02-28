@@ -3,9 +3,11 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using AgentWorkflowManager.Core;
+using Microsoft.Extensions.Configuration;
 using WorkflowManager = AgentWorkflowManager.Core.AgentWorkflowManager;
 
 var singlePrompt = GetSinglePrompt(args);
+var configuration = BuildConfiguration();
 
 try
 {
@@ -39,24 +41,42 @@ try
         return;
     }
 
-    var options = new OpenAiOptions();
-    using var client = new OpenAiResponseClient(options);
+    var openAiOptions = new OpenAiOptions();
+    using var client = new OpenAiResponseClient(openAiOptions);
+
+    var appOptions = configuration.GetSection("AgentWorkflow").Get<AppOptions>() ?? new AppOptions();
 
     var descriptor = new AgentDescriptor(
-        name: "nano-runner",
-        functionDescription: "Provide concise, helpful answers to user questions in French.",
-        model: "gpt-5-nano");
+        name: appOptions.Agent.Name,
+        functionDescription: appOptions.Agent.FunctionDescription,
+        model: appOptions.Agent.Model,
+        temperature: appOptions.Agent.Temperature,
+        topP: appOptions.Agent.TopP,
+        maxOutputTokens: appOptions.Agent.MaxOutputTokens,
+        systemPrompt: appOptions.Agent.SystemPrompt,
+        reasoningEffort: appOptions.Agent.ReasoningEffort,
+        verbosity: appOptions.Agent.Verbosity);
 
     var agent = new OpenAiAgent(client, descriptor);
 
-    var manager = new WorkflowManager();
+    var manager = new WorkflowManager(
+        maxTurns: appOptions.Workflow.MaxTurns,
+        retryPolicy: new AgentRetryPolicy(
+            maxAttempts: appOptions.Workflow.Retry.MaxAttempts,
+            delayBetweenAttempts: TimeSpan.FromMilliseconds(appOptions.Workflow.Retry.DelayMs)),
+        runtimeOptions: new WorkflowRuntimeOptions
+        {
+            AgentTimeout = TimeSpan.FromSeconds(appOptions.Workflow.Timeouts.AgentSeconds),
+            ToolTimeout = TimeSpan.FromSeconds(appOptions.Workflow.Timeouts.ToolSeconds),
+        });
+
     manager.RegisterAgent(agent);
 
     var mcpClient = await RegisterMcpToolsIfPresentAsync(manager).ConfigureAwait(false);
 
     try
     {
-        var session = new AgentSession(manager, "nano-runner");
+        var session = new AgentSession(manager, descriptor.Name);
 
         if (!string.IsNullOrEmpty(singlePrompt))
         {
@@ -64,7 +84,7 @@ try
             return;
         }
 
-        Console.WriteLine("Session ouverte avec l'agent gpt-5-nano. Entrée vide pour quitter.");
+        Console.WriteLine($"Session ouverte avec l'agent {descriptor.Model}. Entrée vide pour quitter.");
 
         while (true)
         {
@@ -95,6 +115,16 @@ catch (Exception ex)
     {
         Console.Error.WriteLine(ex.InnerException);
     }
+}
+
+static IConfigurationRoot BuildConfiguration()
+{
+    return new ConfigurationBuilder()
+        .SetBasePath(Directory.GetCurrentDirectory())
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddJsonFile("appsettings.Development.json", optional: true)
+        .AddEnvironmentVariables(prefix: "AWM_")
+        .Build();
 }
 
 static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
@@ -198,4 +228,42 @@ static string? GetSinglePrompt(string[] args)
     }
 
     return null;
+}
+
+sealed class AppOptions
+{
+    public AgentOptions Agent { get; init; } = new();
+    public WorkflowOptions Workflow { get; init; } = new();
+}
+
+sealed class AgentOptions
+{
+    public string Name { get; init; } = "nano-runner";
+    public string FunctionDescription { get; init; } = "Provide concise, helpful answers to user questions in French.";
+    public string Model { get; init; } = "gpt-5-nano";
+    public double? Temperature { get; init; }
+    public double? TopP { get; init; }
+    public int? MaxOutputTokens { get; init; }
+    public string? SystemPrompt { get; init; }
+    public string? ReasoningEffort { get; init; }
+    public string? Verbosity { get; init; }
+}
+
+sealed class WorkflowOptions
+{
+    public int MaxTurns { get; init; } = 8;
+    public RetryOptions Retry { get; init; } = new();
+    public TimeoutOptions Timeouts { get; init; } = new();
+}
+
+sealed class RetryOptions
+{
+    public int MaxAttempts { get; init; } = 3;
+    public int DelayMs { get; init; } = 400;
+}
+
+sealed class TimeoutOptions
+{
+    public int AgentSeconds { get; init; } = 90;
+    public int ToolSeconds { get; init; } = 45;
 }
