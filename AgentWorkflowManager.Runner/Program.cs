@@ -11,7 +11,6 @@ var configuration = BuildConfiguration();
 
 try
 {
-    // Optional: direct MCP test mode without going through the LLM.
     if (Environment.GetEnvironmentVariable("MCP_DIRECT_TEST") == "1")
     {
         var configPath = ResolveMcpConfigPath();
@@ -46,18 +45,11 @@ try
 
     var appOptions = configuration.GetSection("AgentWorkflow").Get<AppOptions>() ?? new AppOptions();
 
-    var descriptor = new AgentDescriptor(
-        name: appOptions.Agent.Name,
-        functionDescription: appOptions.Agent.FunctionDescription,
-        model: appOptions.Agent.Model,
-        temperature: appOptions.Agent.Temperature,
-        topP: appOptions.Agent.TopP,
-        maxOutputTokens: appOptions.Agent.MaxOutputTokens,
-        systemPrompt: appOptions.Agent.SystemPrompt,
-        reasoningEffort: appOptions.Agent.ReasoningEffort,
-        verbosity: appOptions.Agent.Verbosity);
+    var plannerDescriptor = BuildDescriptor(appOptions.Planner);
+    var executorDescriptor = BuildDescriptor(appOptions.Executor);
 
-    var agent = new OpenAiAgent(client, descriptor);
+    var plannerAgent = new OpenAiAgent(client, plannerDescriptor);
+    var executorAgent = new OpenAiAgent(client, executorDescriptor);
 
     var manager = new WorkflowManager(
         maxTurns: appOptions.Workflow.MaxTurns,
@@ -70,21 +62,30 @@ try
             ToolTimeout = TimeSpan.FromSeconds(appOptions.Workflow.Timeouts.ToolSeconds),
         });
 
-    manager.RegisterAgent(agent);
+    manager.RegisterAgent(plannerAgent);
+    manager.RegisterAgent(executorAgent);
+
+    var router = new RuleBasedAgentRouter(new AgentRoutingOptions
+    {
+        PlannerAgentName = plannerDescriptor.Name,
+        ExecutorAgentName = executorDescriptor.Name,
+    });
 
     var mcpClient = await RegisterMcpToolsIfPresentAsync(manager).ConfigureAwait(false);
 
     try
     {
-        var session = new AgentSession(manager, descriptor.Name);
-
         if (!string.IsNullOrEmpty(singlePrompt))
         {
+            var target = router.ResolveAgent(singlePrompt);
+            var session = new AgentSession(manager, target);
+            Console.WriteLine($"[route] {target}");
             await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
             return;
         }
 
-        Console.WriteLine($"Session ouverte avec l'agent {descriptor.Model}. Entrée vide pour quitter.");
+        Console.WriteLine($"Session ouverte. Planner={plannerDescriptor.Model} | Executor={executorDescriptor.Model}");
+        Console.WriteLine("Entrée vide pour quitter. Préfixes optionnels: /plan ... ou /exec ...");
 
         while (true)
         {
@@ -97,6 +98,9 @@ try
                 break;
             }
 
+            var target = router.ResolveAgent(input);
+            var session = new AgentSession(manager, target);
+            Console.WriteLine($"[route] {target}");
             await RunSinglePromptAsync(session, input).ConfigureAwait(false);
         }
     }
@@ -115,6 +119,20 @@ catch (Exception ex)
     {
         Console.Error.WriteLine(ex.InnerException);
     }
+}
+
+static AgentDescriptor BuildDescriptor(AgentOptions options)
+{
+    return new AgentDescriptor(
+        name: options.Name,
+        functionDescription: options.FunctionDescription,
+        model: options.Model,
+        temperature: options.Temperature,
+        topP: options.TopP,
+        maxOutputTokens: options.MaxOutputTokens,
+        systemPrompt: options.SystemPrompt,
+        reasoningEffort: options.ReasoningEffort,
+        verbosity: options.Verbosity);
 }
 
 static IConfigurationRoot BuildConfiguration()
@@ -232,7 +250,24 @@ static string? GetSinglePrompt(string[] args)
 
 sealed class AppOptions
 {
-    public AgentOptions Agent { get; init; } = new();
+    public AgentOptions Planner { get; init; } = new()
+    {
+        Name = "planner",
+        FunctionDescription = "Break down user requests into concise plans in French, then provide clear actionable steps.",
+        Model = "gpt-5-nano",
+        ReasoningEffort = "minimal",
+        Verbosity = "low",
+    };
+
+    public AgentOptions Executor { get; init; } = new()
+    {
+        Name = "executor",
+        FunctionDescription = "Execute technical/code-oriented requests in French with concise outputs.",
+        Model = "gpt-5-nano",
+        ReasoningEffort = "minimal",
+        Verbosity = "low",
+    };
+
     public WorkflowOptions Workflow { get; init; } = new();
 }
 
