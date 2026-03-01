@@ -206,6 +206,22 @@ static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options
     manager.RegisterTool(new RepoWriteFileTool(workspaceRoot));
     manager.RegisterTool(new RepoListTreeTool(workspaceRoot));
     manager.RegisterTool(new RepoSearchTool(workspaceRoot));
+
+    if (options.SqlServer.EnableQueryTool && !string.IsNullOrWhiteSpace(options.SqlServer.ConnectionString))
+    {
+        manager.RegisterTool(new SqlServerQueryTool(
+            options.SqlServer.ConnectionString,
+            options.SqlServer.StoredProcedureAllowlist,
+            options.SqlServer.CommandTimeoutSeconds));
+
+        manager.RegisterTool(new SqlServerSchemaTablesTool(
+            options.SqlServer.ConnectionString,
+            options.SqlServer.CommandTimeoutSeconds));
+
+        manager.RegisterTool(new SqlServerSchemaProceduresTool(
+            options.SqlServer.ConnectionString,
+            options.SqlServer.CommandTimeoutSeconds));
+    }
 }
 
 static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
@@ -412,6 +428,15 @@ sealed class ToolsOptions
 {
     public bool EnableRepoFileTools { get; init; } = true;
     public string WorkspaceRoot { get; init; } = ".";
+    public SqlServerToolOptions SqlServer { get; init; } = new();
+}
+
+sealed class SqlServerToolOptions
+{
+    public bool EnableQueryTool { get; init; } = false;
+    public string? ConnectionString { get; init; }
+    public int CommandTimeoutSeconds { get; init; } = 30;
+    public string[] StoredProcedureAllowlist { get; init; } = Array.Empty<string>();
 }
 
 sealed class AgentOptions

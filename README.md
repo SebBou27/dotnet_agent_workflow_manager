@@ -138,6 +138,56 @@ Arguments JSON:
 - écriture UTF-8 atomique (temp + replace)
 - sandbox actif: pas de sortie hors `WorkspaceRoot`
 
+## Tools SQL Server
+Tools optionnels pour SQL Server.
+
+Configuration:
+```json
+"Tools": {
+  "SqlServer": {
+    "EnableQueryTool": false,
+    "ConnectionString": "",
+    "CommandTimeoutSeconds": 30,
+    "StoredProcedureAllowlist": ["dbo.ReadDashboard"]
+  }
+}
+```
+
+### Mode SQL brut (lecture seule)
+```json
+{
+  "commandType": "text",
+  "sql": "SELECT TOP 20 * FROM Users WHERE Status = @status",
+  "parameters": { "status": "Active" },
+  "maxRows": 200
+}
+```
+- Autorisé: `SELECT` / `WITH` (CTE)
+- Interdit: `INSERT/UPDATE/DELETE/MERGE/ALTER/DROP/TRUNCATE/EXEC...`
+
+### db.sqlserver.query — mode procédure stockée
+```json
+{
+  "commandType": "storedProcedure",
+  "procedure": "dbo.ReadDashboard",
+  "parameters": { "projectId": 42 },
+  "maxRows": 200
+}
+```
+- La procédure peut être filtrée via `StoredProcedureAllowlist`
+
+### db.sqlserver.schema_tables
+Liste tables/colonnes (métadonnées):
+```json
+{ "schema": "dbo", "table": "Users", "maxRows": 1000 }
+```
+
+### db.sqlserver.schema_procedures
+Liste procédures (+ paramètres optionnels):
+```json
+{ "schema": "dbo", "procedure": "ReadDashboard", "includeParameters": true }
+```
+
 ## Mémoire de session (planner/executor)
 Le runner persiste l'historique de conversation par agent dans `./.sessions` (configurable):
 - `AgentWorkflow:Workflow:SessionMemory:Enabled`
