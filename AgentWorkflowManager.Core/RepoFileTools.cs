@@ -267,6 +267,161 @@ public sealed class RepoListTreeTool : IAgentTool
     }
 }
 
+public sealed class RepoSearchTool : IAgentTool
+{
+    private const int DefaultMaxResults = 100;
+    private const int MaxResultsCap = 2000;
+
+    private static readonly JsonNode ParametersSchema = JsonNode.Parse("""
+    {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "Texte à rechercher (obligatoire)." },
+        "path": { "type": "string", "description": "Dossier/fichier relatif pour limiter la recherche (défaut: racine)." },
+        "caseSensitive": { "type": "boolean", "description": "Recherche sensible à la casse (défaut: false)." },
+        "maxResults": { "type": "integer", "minimum": 1, "maximum": 2000, "description": "Nombre max de matches (défaut: 100)." }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+    """)!;
+
+    private readonly RepoSandboxPathResolver _pathResolver;
+
+    public RepoSearchTool(string repositoryRoot)
+    {
+        _pathResolver = new RepoSandboxPathResolver(repositoryRoot);
+        Definition = new ToolDefinition(
+            "repo.search",
+            "Recherche du texte dans les fichiers du dépôt (sandbox: chemins relatifs uniquement).",
+            ParametersSchema);
+    }
+
+    public string Name => Definition.Name;
+
+    public ToolDefinition Definition { get; }
+
+    public Task<AgentToolExecutionResult> InvokeAsync(ToolInvocationContext context, CancellationToken cancellationToken)
+    {
+        var (query, path, caseSensitive, maxResults) = GetArguments(context.ToolCall.Arguments);
+        var effectivePath = string.IsNullOrWhiteSpace(path) ? "." : path!;
+        var fullPath = _pathResolver.Resolve(effectivePath);
+
+        var files = File.Exists(fullPath)
+            ? new[] { fullPath }
+            : Directory.Exists(fullPath)
+                ? Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories)
+                : throw new InvalidOperationException($"Le chemin '{effectivePath}' est introuvable dans le dépôt.");
+
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var results = new System.Collections.Generic.List<object>();
+
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string[] lines;
+            try
+            {
+                lines = File.ReadAllLines(file);
+            }
+            catch
+            {
+                continue;
+            }
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (results.Count >= Math.Min(maxResults, MaxResultsCap))
+                {
+                    var payloadCap = JsonSerializer.Serialize(new
+                    {
+                        query,
+                        path = effectivePath,
+                        maxResults = Math.Min(maxResults, MaxResultsCap),
+                        truncated = true,
+                        count = results.Count,
+                        results,
+                    });
+                    return Task.FromResult(new AgentToolExecutionResult(context.ToolCall.CallId, payloadCap));
+                }
+
+                if (lines[i].IndexOf(query, comparison) >= 0)
+                {
+                    var rel = Path.GetRelativePath(fullPath, file).Replace('\\', '/');
+                    results.Add(new { file = rel, line = i + 1, text = lines[i] });
+                }
+            }
+        }
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            query,
+            path = effectivePath,
+            maxResults = Math.Min(maxResults, MaxResultsCap),
+            truncated = false,
+            count = results.Count,
+            results,
+        });
+
+        return Task.FromResult(new AgentToolExecutionResult(context.ToolCall.CallId, payload));
+    }
+
+    private static (string Query, string? Path, bool CaseSensitive, int MaxResults) GetArguments(JsonDocument arguments)
+    {
+        var query = ReadRequiredString(arguments, "query", "L'outil repo.search requiert un argument string 'query'.");
+
+        string? path = null;
+        if (arguments.RootElement.TryGetProperty("path", out var pathElement) && pathElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (pathElement.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException("L'argument 'path' doit être une string.");
+            }
+
+            path = pathElement.GetString();
+        }
+
+        var caseSensitive = false;
+        if (arguments.RootElement.TryGetProperty("caseSensitive", out var caseElement) && caseElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (caseElement.ValueKind != JsonValueKind.True && caseElement.ValueKind != JsonValueKind.False)
+            {
+                throw new InvalidOperationException("L'argument 'caseSensitive' doit être un booléen.");
+            }
+
+            caseSensitive = caseElement.GetBoolean();
+        }
+
+        var maxResults = DefaultMaxResults;
+        if (arguments.RootElement.TryGetProperty("maxResults", out var maxElement) && maxElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (maxElement.ValueKind != JsonValueKind.Number || !maxElement.TryGetInt32(out maxResults) || maxResults < 1)
+            {
+                throw new InvalidOperationException("L'argument 'maxResults' doit être un entier >= 1.");
+            }
+        }
+
+        return (query, path, caseSensitive, maxResults);
+    }
+
+    private static string ReadRequiredString(JsonDocument arguments, string name, string error)
+    {
+        if (!arguments.RootElement.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        var value = element.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"L'argument '{name}' ne peut pas être vide.");
+        }
+
+        return value;
+    }
+}
+
 public sealed class RepoWriteFileTool : IAgentTool
 {
     private static readonly JsonNode ParametersSchema = JsonNode.Parse("""

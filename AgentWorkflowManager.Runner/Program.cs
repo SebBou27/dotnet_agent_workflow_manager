@@ -205,6 +205,7 @@ static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options
     manager.RegisterTool(new RepoReadFileTool(workspaceRoot));
     manager.RegisterTool(new RepoWriteFileTool(workspaceRoot));
     manager.RegisterTool(new RepoListTreeTool(workspaceRoot));
+    manager.RegisterTool(new RepoSearchTool(workspaceRoot));
 }
 
 static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
