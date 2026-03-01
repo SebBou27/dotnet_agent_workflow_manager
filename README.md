@@ -138,8 +138,8 @@ Arguments JSON:
 - écriture UTF-8 atomique (temp + replace)
 - sandbox actif: pas de sortie hors `WorkspaceRoot`
 
-## Tool SQL Server (db.sqlserver.query)
-Tool optionnel pour requêtes SQL Server.
+## Tools SQL Server
+Tools optionnels pour SQL Server.
 
 Configuration:
 ```json
@@ -165,7 +165,7 @@ Configuration:
 - Autorisé: `SELECT` / `WITH` (CTE)
 - Interdit: `INSERT/UPDATE/DELETE/MERGE/ALTER/DROP/TRUNCATE/EXEC...`
 
-### Mode procédure stockée
+### db.sqlserver.query — mode procédure stockée
 ```json
 {
   "commandType": "storedProcedure",
@@ -175,6 +175,18 @@ Configuration:
 }
 ```
 - La procédure peut être filtrée via `StoredProcedureAllowlist`
+
+### db.sqlserver.schema_tables
+Liste tables/colonnes (métadonnées):
+```json
+{ "schema": "dbo", "table": "Users", "maxRows": 1000 }
+```
+
+### db.sqlserver.schema_procedures
+Liste procédures (+ paramètres optionnels):
+```json
+{ "schema": "dbo", "procedure": "ReadDashboard", "includeParameters": true }
+```
 
 ## Mémoire de session (planner/executor)
 Le runner persiste l'historique de conversation par agent dans `./.sessions` (configurable):

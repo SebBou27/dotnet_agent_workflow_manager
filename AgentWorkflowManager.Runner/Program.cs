@@ -213,6 +213,14 @@ static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options
             options.SqlServer.ConnectionString,
             options.SqlServer.StoredProcedureAllowlist,
             options.SqlServer.CommandTimeoutSeconds));
+
+        manager.RegisterTool(new SqlServerSchemaTablesTool(
+            options.SqlServer.ConnectionString,
+            options.SqlServer.CommandTimeoutSeconds));
+
+        manager.RegisterTool(new SqlServerSchemaProceduresTool(
+            options.SqlServer.ConnectionString,
+            options.SqlServer.CommandTimeoutSeconds));
     }
 }
 
