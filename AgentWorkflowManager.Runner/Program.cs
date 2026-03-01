@@ -229,7 +229,18 @@ static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options
             ? Path.Combine(currentDirectory, "generated-assets")
             : options.Assets.OutputDirectory;
 
-        manager.RegisterTool(new UiGenerateAssetTool(new OpenAiOptions(), assetsDir));
+        var selectedModel = string.Equals(options.Assets.Profile, "prod", StringComparison.OrdinalIgnoreCase)
+            ? options.Assets.ProdModel
+            : options.Assets.TestModel;
+
+        manager.RegisterTool(new UiGenerateAssetTool(
+            new OpenAiOptions(),
+            assetsDir,
+            new UiGenerateAssetTool.UiGenerateAssetOptions(
+                Model: selectedModel,
+                DefaultSize: options.Assets.DefaultSize,
+                DefaultQuality: options.Assets.DefaultQuality,
+                DefaultBackground: options.Assets.DefaultBackground)));
     }
 }
 
@@ -445,6 +456,12 @@ sealed class AssetToolOptions
 {
     public bool EnableGenerateAssetTool { get; init; } = false;
     public string OutputDirectory { get; init; } = "generated-assets";
+    public string Profile { get; init; } = "test"; // test | prod
+    public string TestModel { get; init; } = "gpt-image-1-mini";
+    public string ProdModel { get; init; } = "gpt-image-1.5";
+    public string DefaultSize { get; init; } = "1024x1024";
+    public string DefaultQuality { get; init; } = "medium";
+    public string DefaultBackground { get; init; } = "auto";
 }
 
 sealed class SqlServerToolOptions

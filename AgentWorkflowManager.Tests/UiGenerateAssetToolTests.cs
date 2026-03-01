@@ -25,7 +25,11 @@ public sealed class UiGenerateAssetToolTests
             var b64 = Convert.ToBase64String(pngBytes);
             var handler = new FakeHttpHandler("{\"data\":[{\"b64_json\":\"" + b64 + "\"}]}");
             var client = new HttpClient(handler);
-            var tool = new UiGenerateAssetTool(new OpenAiOptions("test-key"), root, client);
+            var tool = new UiGenerateAssetTool(
+                new OpenAiOptions("test-key"),
+                root,
+                new UiGenerateAssetTool.UiGenerateAssetOptions("gpt-image-1-mini"),
+                client);
 
             using var args = JsonDocument.Parse("""{"prompt":"icon dashboard","filename":"icon-dashboard"}""");
             var result = await tool.InvokeAsync(Ctx("c1", "ui.generate_asset", args), CancellationToken.None);

@@ -12,6 +12,12 @@ namespace AgentWorkflowManager.Core;
 
 public sealed class UiGenerateAssetTool : IAgentTool
 {
+    public sealed record UiGenerateAssetOptions(
+        string Model,
+        string DefaultSize = "1024x1024",
+        string DefaultQuality = "medium",
+        string DefaultBackground = "auto");
+
     private static readonly JsonNode ParametersSchema = JsonNode.Parse("""
     {
       "type": "object",
@@ -29,8 +35,9 @@ public sealed class UiGenerateAssetTool : IAgentTool
 
     private readonly HttpClient _httpClient;
     private readonly string _assetsDirectory;
+    private readonly UiGenerateAssetOptions _toolOptions;
 
-    public UiGenerateAssetTool(OpenAiOptions options, string assetsDirectory, HttpClient? httpClient = null)
+    public UiGenerateAssetTool(OpenAiOptions options, string assetsDirectory, UiGenerateAssetOptions? toolOptions = null, HttpClient? httpClient = null)
     {
         if (string.IsNullOrWhiteSpace(assetsDirectory))
         {
@@ -38,6 +45,7 @@ public sealed class UiGenerateAssetTool : IAgentTool
         }
 
         _assetsDirectory = assetsDirectory;
+        _toolOptions = toolOptions ?? new UiGenerateAssetOptions("gpt-image-1");
         Directory.CreateDirectory(_assetsDirectory);
 
         _httpClient = httpClient ?? new HttpClient();
@@ -59,9 +67,9 @@ public sealed class UiGenerateAssetTool : IAgentTool
 
         var prompt = ReadRequiredString(args, "prompt", "'prompt' is required.");
         var filename = ReadRequiredString(args, "filename", "'filename' is required.");
-        var size = ReadOptionalString(args, "size") ?? "1024x1024";
-        var quality = ReadOptionalString(args, "quality") ?? "medium";
-        var background = ReadOptionalString(args, "background") ?? "auto";
+        var size = ReadOptionalString(args, "size") ?? _toolOptions.DefaultSize;
+        var quality = ReadOptionalString(args, "quality") ?? _toolOptions.DefaultQuality;
+        var background = ReadOptionalString(args, "background") ?? _toolOptions.DefaultBackground;
 
         if (!filename.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
         {
@@ -73,7 +81,7 @@ public sealed class UiGenerateAssetTool : IAgentTool
 
         var requestBody = JsonSerializer.Serialize(new
         {
-            model = "gpt-image-1",
+            model = _toolOptions.Model,
             prompt,
             size,
             quality,

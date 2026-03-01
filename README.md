@@ -196,10 +196,15 @@ Configuration:
 "Tools": {
   "Assets": {
     "EnableGenerateAssetTool": true,
-    "OutputDirectory": "generated-assets"
+    "OutputDirectory": "generated-assets",
+    "Profile": "test",
+    "TestModel": "gpt-image-1-mini",
+    "ProdModel": "gpt-image-1.5"
   }
 }
 ```
+- `Profile=test` => utilise `TestModel`
+- `Profile=prod` => utilise `ProdModel`
 
 Arguments:
 ```json
