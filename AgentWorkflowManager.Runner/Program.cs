@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using WorkflowManager = AgentWorkflowManager.Core.AgentWorkflowManager;
 
 var singlePrompt = GetSinglePrompt(args);
+var forcedAgent = GetForcedAgent(args);
 var configuration = BuildConfiguration();
 
 try
@@ -101,7 +102,7 @@ try
     {
         if (!string.IsNullOrEmpty(singlePrompt))
         {
-            var target = router.ResolveAgent(singlePrompt);
+            var target = ResolveTargetAgent(forcedAgent, router, singlePrompt, plannerDescriptor.Name, executorDescriptor.Name);
             var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
             var singleResult = await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
@@ -132,7 +133,7 @@ try
                 continue;
             }
 
-            var target = router.ResolveAgent(input);
+            var target = ResolveTargetAgent(forcedAgent, router, input, plannerDescriptor.Name, executorDescriptor.Name);
             var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
             var result = await RunSinglePromptAsync(session, input).ConfigureAwait(false);
@@ -318,6 +319,40 @@ static string? GetSinglePrompt(string[] args)
     }
 
     return null;
+}
+
+static string? GetForcedAgent(string[] args)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (arg.Equals("--agent", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            return args[i + 1];
+        }
+
+        if (arg.StartsWith("--agent=", StringComparison.OrdinalIgnoreCase))
+        {
+            return arg.Substring("--agent=".Length);
+        }
+    }
+
+    return null;
+}
+
+static string ResolveTargetAgent(string? forcedAgent, RuleBasedAgentRouter router, string input, string plannerName, string executorName)
+{
+    if (string.IsNullOrWhiteSpace(forcedAgent))
+    {
+        return router.ResolveAgent(input);
+    }
+
+    return forcedAgent.Trim().ToLowerInvariant() switch
+    {
+        "planner" => plannerName,
+        "executor" => executorName,
+        _ => router.ResolveAgent(input),
+    };
 }
 
 sealed class AppOptions
