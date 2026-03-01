@@ -222,6 +222,15 @@ static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options
             options.SqlServer.ConnectionString,
             options.SqlServer.CommandTimeoutSeconds));
     }
+
+    if (options.Assets.EnableGenerateAssetTool)
+    {
+        var assetsDir = string.IsNullOrWhiteSpace(options.Assets.OutputDirectory)
+            ? Path.Combine(currentDirectory, "generated-assets")
+            : options.Assets.OutputDirectory;
+
+        manager.RegisterTool(new UiGenerateAssetTool(new OpenAiOptions(), assetsDir));
+    }
 }
 
 static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
@@ -429,6 +438,13 @@ sealed class ToolsOptions
     public bool EnableRepoFileTools { get; init; } = true;
     public string WorkspaceRoot { get; init; } = ".";
     public SqlServerToolOptions SqlServer { get; init; } = new();
+    public AssetToolOptions Assets { get; init; } = new();
+}
+
+sealed class AssetToolOptions
+{
+    public bool EnableGenerateAssetTool { get; init; } = false;
+    public string OutputDirectory { get; init; } = "generated-assets";
 }
 
 sealed class SqlServerToolOptions

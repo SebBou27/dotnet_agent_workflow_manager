@@ -188,6 +188,31 @@ Liste procédures (+ paramètres optionnels):
 { "schema": "dbo", "procedure": "ReadDashboard", "includeParameters": true }
 ```
 
+## Tool génération d'assets (ui.generate_asset)
+Permet de générer des visuels PNG via OpenAI Images API.
+
+Configuration:
+```json
+"Tools": {
+  "Assets": {
+    "EnableGenerateAssetTool": true,
+    "OutputDirectory": "generated-assets"
+  }
+}
+```
+
+Arguments:
+```json
+{
+  "prompt": "Icone fantasy bleue pour dashboard analytics",
+  "filename": "icon-analytics",
+  "size": "1024x1024",
+  "quality": "medium",
+  "background": "transparent"
+}
+```
+Sortie JSON: chemin du fichier généré + taille bytes.
+
 ## Mémoire de session (planner/executor)
 Le runner persiste l'historique de conversation par agent dans `./.sessions` (configurable):
 - `AgentWorkflow:Workflow:SessionMemory:Enabled`
