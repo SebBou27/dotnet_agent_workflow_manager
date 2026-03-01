@@ -84,6 +84,21 @@ Exemple:
 }
 ```
 
+## Export métriques (JSONL)
+Le runner peut exporter les métriques de chaque interaction dans un fichier JSONL:
+- `AgentWorkflow:Workflow:Metrics:Enabled`
+- `AgentWorkflow:Workflow:Metrics:FilePath`
+
+Exemple:
+```json
+"Metrics": {
+  "Enabled": true,
+  "FilePath": ".metrics/workflow-metrics.jsonl"
+}
+```
+
+Chaque ligne contient: timestamp UTC, agent ciblé, turns, tool calls, erreurs, durée.
+
 ## MCP tools
 1. Copier `mcp.tools.example.json` vers `mcp.tools.json`
 2. Ajuster les endpoints

@@ -56,3 +56,4 @@ nunit-*.xml
 .env
 mcp.tools.json
 .sessions/
+.metrics/

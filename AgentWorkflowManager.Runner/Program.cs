@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using AgentWorkflowManager.Core;
 using Microsoft.Extensions.Configuration;
@@ -75,6 +76,10 @@ try
         ? new AgentSessionMemoryStore(appOptions.Workflow.SessionMemory.Directory)
         : null;
 
+    var metricsExporter = appOptions.Workflow.Metrics.Enabled
+        ? new MetricsJsonlExporter(appOptions.Workflow.Metrics.FilePath)
+        : null;
+
     var sessions = new System.Collections.Generic.Dictionary<string, AgentSession>(StringComparer.OrdinalIgnoreCase);
 
     AgentSession GetOrCreateSession(string agentName)
@@ -99,8 +104,9 @@ try
             var target = router.ResolveAgent(singlePrompt);
             var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
-            await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
+            var singleResult = await RunSinglePromptAsync(session, singlePrompt).ConfigureAwait(false);
             sessionStore?.SaveConversation(target, session.Conversation);
+            metricsExporter?.Append(target, singleResult.Metrics);
             return;
         }
 
@@ -132,6 +138,7 @@ try
             var result = await RunSinglePromptAsync(session, input).ConfigureAwait(false);
             lastMetrics = result.Metrics;
             sessionStore?.SaveConversation(target, session.Conversation);
+            metricsExporter?.Append(target, result.Metrics);
         }
     }
     finally
@@ -355,6 +362,7 @@ sealed class WorkflowOptions
     public RetryOptions Retry { get; init; } = new();
     public TimeoutOptions Timeouts { get; init; } = new();
     public SessionMemoryOptions SessionMemory { get; init; } = new();
+    public MetricsOptions Metrics { get; init; } = new();
 }
 
 sealed class RetryOptions
@@ -373,4 +381,43 @@ sealed class SessionMemoryOptions
 {
     public bool Enabled { get; init; } = true;
     public string Directory { get; init; } = ".sessions";
+}
+
+sealed class MetricsOptions
+{
+    public bool Enabled { get; init; } = true;
+    public string FilePath { get; init; } = ".metrics/workflow-metrics.jsonl";
+}
+
+sealed class MetricsJsonlExporter
+{
+    private readonly string _filePath;
+
+    public MetricsJsonlExporter(string filePath)
+    {
+        _filePath = filePath;
+        var dir = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrWhiteSpace(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+    }
+
+    public void Append(string agentName, AgentWorkflowMetrics? metrics)
+    {
+        if (metrics is null) return;
+
+        var line = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow,
+            agent = agentName,
+            turns = metrics.Turns,
+            toolCalls = metrics.ToolCallsRequested,
+            toolOk = metrics.ToolCallsSucceeded,
+            toolErr = metrics.ToolCallsFailed,
+            durationMs = metrics.DurationMs,
+        });
+
+        File.AppendAllText(_filePath, line + Environment.NewLine);
+    }
 }
