@@ -105,7 +105,9 @@ try
         }
 
         Console.WriteLine($"Session ouverte. Planner={plannerDescriptor.Model} | Executor={executorDescriptor.Model}");
-        Console.WriteLine("Entrée vide pour quitter. Préfixes optionnels: /plan ... ou /exec ...");
+        Console.WriteLine("Entrée vide pour quitter. Préfixes: /plan ... | /exec ... | /status");
+
+        AgentWorkflowMetrics? lastMetrics = null;
 
         while (true)
         {
@@ -118,10 +120,17 @@ try
                 break;
             }
 
+            if (string.Equals(input.Trim(), "/status", StringComparison.OrdinalIgnoreCase))
+            {
+                PrintStatus(sessions, lastMetrics, sessionStore is not null ? appOptions.Workflow.SessionMemory.Directory : null);
+                continue;
+            }
+
             var target = router.ResolveAgent(input);
             var session = GetOrCreateSession(target);
             Console.WriteLine($"[route] {target}");
-            await RunSinglePromptAsync(session, input).ConfigureAwait(false);
+            var result = await RunSinglePromptAsync(session, input).ConfigureAwait(false);
+            lastMetrics = result.Metrics;
             sessionStore?.SaveConversation(target, session.Conversation);
         }
     }
@@ -219,7 +228,7 @@ static string? ResolveMcpConfigPath()
     return null;
 }
 
-static async Task RunSinglePromptAsync(AgentSession session, string prompt)
+static async Task<AgentWorkflowResult> RunSinglePromptAsync(AgentSession session, string prompt)
 {
     var result = await session.SendAsync(prompt).ConfigureAwait(false);
     var reply = session.GetLatestAssistantText();
@@ -249,6 +258,36 @@ static async Task RunSinglePromptAsync(AgentSession session, string prompt)
                 Console.WriteLine($"[{status}] {toolContent.Output}");
             }
         }
+    }
+
+    return result;
+}
+
+static void PrintStatus(System.Collections.Generic.IReadOnlyDictionary<string, AgentSession> sessions, AgentWorkflowMetrics? lastMetrics, string? memoryDirectory)
+{
+    Console.WriteLine("=== STATUS ===");
+    Console.WriteLine($"Sessions actives: {sessions.Count}");
+    foreach (var kvp in sessions)
+    {
+        Console.WriteLine($" - {kvp.Key}: {kvp.Value.Conversation.Count} messages");
+    }
+
+    if (lastMetrics is not null)
+    {
+        Console.WriteLine($"Dernières métriques: turns={lastMetrics.Turns}, tools={lastMetrics.ToolCallsRequested}, ok={lastMetrics.ToolCallsSucceeded}, err={lastMetrics.ToolCallsFailed}, durationMs={lastMetrics.DurationMs}");
+    }
+    else
+    {
+        Console.WriteLine("Dernières métriques: n/a");
+    }
+
+    if (!string.IsNullOrWhiteSpace(memoryDirectory))
+    {
+        Console.WriteLine($"Session memory: enabled ({memoryDirectory})");
+    }
+    else
+    {
+        Console.WriteLine("Session memory: disabled");
     }
 }
 

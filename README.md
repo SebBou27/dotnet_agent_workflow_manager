@@ -24,6 +24,15 @@ dotnet test AgentWorkflowManager.sln -c Debug
 dotnet run --project AgentWorkflowManager.Runner -- --prompt "Bonjour"
 ```
 
+Mode interactif:
+```bash
+dotnet run --project AgentWorkflowManager.Runner
+```
+Commandes utiles:
+- `/plan ...` force le planner
+- `/exec ...` force l'executor
+- `/status` affiche sessions actives + dernières métriques
+
 ## Configuration
 Le runner charge:
 1. `AgentWorkflowManager.Runner/appsettings.json`
