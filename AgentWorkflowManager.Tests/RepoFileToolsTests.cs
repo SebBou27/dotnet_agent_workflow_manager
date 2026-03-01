@@ -110,6 +110,22 @@ public sealed class RepoFileToolsTests
     }
 
     [Fact]
+    public async Task Search_AcceptsQueryAliasQ()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "a.txt"), "hello token");
+            var tool = new RepoSearchTool(tempDir);
+            using var args = JsonDocument.Parse("""{"q":"token"}""");
+            var result = await tool.InvokeAsync(CreateContext("c1", "repo.search", args), CancellationToken.None);
+            using var payload = JsonDocument.Parse(result.Output);
+            Assert.True(payload.RootElement.GetProperty("count").GetInt32() >= 1);
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
     public async Task Search_DenyTraversal()
     {
         var tempDir = CreateTempDir();
@@ -139,6 +155,28 @@ public sealed class RepoFileToolsTests
             using var payload = JsonDocument.Parse(result.Output);
             Assert.Equal("dir/out.txt", payload.RootElement.GetProperty("path").GetString());
             Assert.True(payload.RootElement.GetProperty("bytes").GetInt32() > 0);
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
+    public async Task ReadAndWrite_AcceptsCommonAliases()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "alias.txt"), "alpha\nbeta");
+
+            var readTool = new RepoReadFileTool(tempDir);
+            using var readArgs = JsonDocument.Parse("""{"file":"alias.txt","offset":1,"limit":1}""");
+            var readResult = await readTool.InvokeAsync(CreateContext("c1", "repo.read_file", readArgs), CancellationToken.None);
+            using var readPayload = JsonDocument.Parse(readResult.Output);
+            Assert.Contains("alpha", readPayload.RootElement.GetProperty("content").GetString());
+
+            var writeTool = new RepoWriteFileTool(tempDir);
+            using var writeArgs = JsonDocument.Parse("""{"filePath":"out/alias.md","text":"ok","createDirs":true}""");
+            await writeTool.InvokeAsync(CreateContext("c2", "repo.write_file", writeArgs), CancellationToken.None);
+            Assert.True(File.Exists(Path.Combine(tempDir, "out", "alias.md")));
         }
         finally { SafeDelete(tempDir); }
     }
