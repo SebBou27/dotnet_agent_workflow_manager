@@ -99,6 +99,19 @@ Exemple:
 
 Chaque ligne contient: timestamp UTC, agent ciblé, turns, tool calls, erreurs, durée.
 
+### Synthèse rapide des métriques
+Script fourni:
+```powershell
+./scripts/metrics-summary.ps1
+```
+
+Options:
+```powershell
+./scripts/metrics-summary.ps1 -Path ".metrics/workflow-metrics.jsonl" -Last 500
+```
+
+Sortie: volume, durée moyenne/p50/p95, taux d'erreur tools global + par agent.
+
 ## MCP tools
 1. Copier `mcp.tools.example.json` vers `mcp.tools.json`
 2. Ajuster les endpoints
