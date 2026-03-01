@@ -123,9 +123,11 @@ Le fichier `mcp.tools.json` est ignoré par Git.
 Par défaut, les payloads complets prompts/réponses sont masqués dans les logs.
 Pour debug local approfondi: `AWM_LOG_PAYLOADS=true`.
 
+## Exemples d'utilisation
+Voir `EXAMPLES.md` pour des scénarios prêts à copier-coller (one-shot, interactif, /plan, /exec, /status, métriques, MCP).
+
 ## Limites actuelles
 - Runner orienté console (pas encore service HTTP)
-- Pas de métriques/export avancé (à venir)
 
 ## Dépannage rapide
 - `OpenAI API key is not configured` : vérifier `OPENAI_API_KEY` / `.env`
