@@ -82,6 +82,38 @@ Exemple config:
 - `AWM_LOG_PAYLOADS` : `true|false` (par défaut recommandé: false)
 - `MCP_DIRECT_TEST=1` : mode test MCP direct
 
+## Tools fichiers (repo.read_file / repo.write_file)
+Le runner enregistre deux tools locaux sandboxés sur la racine du dépôt.
+
+Configuration:
+```json
+"Tools": {
+  "EnableRepoFileTools": true,
+  "WorkspaceRoot": "."
+}
+```
+
+### repo.read_file
+Arguments JSON:
+```json
+{ "path": "src/app.js", "offset": 1, "limit": 200 }
+```
+- `offset`: 1-indexé, défaut 1
+- `limit`: défaut 200, max 2000
+
+Retour JSON:
+```json
+{ "path":"src/app.js", "offset":1, "limit":200, "totalLines":820, "truncated":true, "content":"..." }
+```
+
+### repo.write_file
+Arguments JSON:
+```json
+{ "path": "src/new.txt", "content": "hello", "createDirs": true }
+```
+- écriture UTF-8 atomique (temp + replace)
+- sandbox actif: pas de sortie hors `WorkspaceRoot`
+
 ## Mémoire de session (planner/executor)
 Le runner persiste l'historique de conversation par agent dans `./.sessions` (configurable):
 - `AgentWorkflow:Workflow:SessionMemory:Enabled`

@@ -68,6 +68,8 @@ try
     manager.RegisterAgent(plannerAgent);
     manager.RegisterAgent(executorAgent);
 
+    RegisterLocalRepoTools(manager, appOptions.Tools, Directory.GetCurrentDirectory());
+
     var router = new RuleBasedAgentRouter(new AgentRoutingOptions
     {
         PlannerAgentName = plannerDescriptor.Name,
@@ -187,6 +189,21 @@ static IConfigurationRoot BuildConfiguration()
         .AddJsonFile("appsettings.Development.json", optional: true)
         .AddEnvironmentVariables(prefix: "AWM_")
         .Build();
+}
+
+static void RegisterLocalRepoTools(WorkflowManager manager, ToolsOptions options, string currentDirectory)
+{
+    if (!options.EnableRepoFileTools)
+    {
+        return;
+    }
+
+    var workspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot)
+        ? currentDirectory
+        : options.WorkspaceRoot;
+
+    manager.RegisterTool(new RepoReadFileTool(workspaceRoot));
+    manager.RegisterTool(new RepoWriteFileTool(workspaceRoot));
 }
 
 static Task<IAsyncDisposable?> RegisterMcpToolsIfPresentAsync(WorkflowManager manager)
@@ -366,6 +383,8 @@ static string ResolveTargetAgent(string? forcedAgent, RuleBasedAgentRouter route
 
 sealed class AppOptions
 {
+    public ToolsOptions Tools { get; init; } = new();
+
     public AgentOptions Planner { get; init; } = new()
     {
         Name = "planner",
@@ -385,6 +404,12 @@ sealed class AppOptions
     };
 
     public WorkflowOptions Workflow { get; init; } = new();
+}
+
+sealed class ToolsOptions
+{
+    public bool EnableRepoFileTools { get; init; } = true;
+    public string WorkspaceRoot { get; init; } = ".";
 }
 
 sealed class AgentOptions
