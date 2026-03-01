@@ -112,7 +112,8 @@ public sealed class RepoReadFileTool : IAgentTool
 
     private static (string Path, int Offset, int Limit) GetArguments(JsonDocument arguments)
     {
-        var path = ReadRequiredString(arguments, "path", "L'outil repo.read_file requiert un argument string 'path'.");
+        var path = ReadFirstString(arguments, new[] { "path", "file", "filePath", "target" },
+            "L'outil repo.read_file requiert un argument string 'path' (aliases acceptés: file,filePath,target).");
 
         var offset = DefaultOffset;
         if (arguments.RootElement.TryGetProperty("offset", out var offsetElement) && offsetElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
@@ -136,20 +137,21 @@ public sealed class RepoReadFileTool : IAgentTool
         return (path, offset, limit);
     }
 
-    private static string ReadRequiredString(JsonDocument arguments, string name, string error)
+    private static string ReadFirstString(JsonDocument arguments, string[] names, string error)
     {
-        if (!arguments.RootElement.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+        foreach (var name in names)
         {
-            throw new InvalidOperationException(error);
+            if (arguments.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String)
+            {
+                var value = element.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
         }
 
-        var value = element.GetString();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"L'argument '{name}' ne peut pas être vide.");
-        }
-
-        return value;
+        throw new InvalidOperationException(error);
     }
 }
 
@@ -369,18 +371,10 @@ public sealed class RepoSearchTool : IAgentTool
 
     private static (string Query, string? Path, bool CaseSensitive, int MaxResults) GetArguments(JsonDocument arguments)
     {
-        var query = ReadRequiredString(arguments, "query", "L'outil repo.search requiert un argument string 'query'.");
+        var query = ReadFirstString(arguments, new[] { "query", "q", "text", "pattern", "needle" },
+            "L'outil repo.search requiert un argument string 'query' (aliases acceptés: q,text,pattern,needle).");
 
-        string? path = null;
-        if (arguments.RootElement.TryGetProperty("path", out var pathElement) && pathElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
-        {
-            if (pathElement.ValueKind != JsonValueKind.String)
-            {
-                throw new InvalidOperationException("L'argument 'path' doit être une string.");
-            }
-
-            path = pathElement.GetString();
-        }
+        var path = ReadOptionalString(arguments, new[] { "path", "dir", "folder", "root", "basePath" });
 
         var caseSensitive = false;
         if (arguments.RootElement.TryGetProperty("caseSensitive", out var caseElement) && caseElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
@@ -405,20 +399,34 @@ public sealed class RepoSearchTool : IAgentTool
         return (query, path, caseSensitive, maxResults);
     }
 
-    private static string ReadRequiredString(JsonDocument arguments, string name, string error)
+    private static string ReadFirstString(JsonDocument arguments, string[] names, string error)
     {
-        if (!arguments.RootElement.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+        foreach (var name in names)
         {
-            throw new InvalidOperationException(error);
+            if (arguments.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String)
+            {
+                var value = element.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
         }
 
-        var value = element.GetString();
-        if (string.IsNullOrWhiteSpace(value))
+        throw new InvalidOperationException(error);
+    }
+
+    private static string? ReadOptionalString(JsonDocument arguments, string[] names)
+    {
+        foreach (var name in names)
         {
-            throw new InvalidOperationException($"L'argument '{name}' ne peut pas être vide.");
+            if (arguments.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String)
+            {
+                return element.GetString();
+            }
         }
 
-        return value;
+        return null;
     }
 }
 
@@ -512,8 +520,10 @@ public sealed class RepoWriteFileTool : IAgentTool
 
     private static (string Path, string Content, bool CreateDirs) GetArguments(JsonDocument arguments)
     {
-        var path = ReadRequiredString(arguments, "path", "L'outil repo.write_file requiert un argument string 'path'.");
-        var content = ReadRequiredString(arguments, "content", "L'outil repo.write_file requiert un argument string 'content'.");
+        var path = ReadFirstString(arguments, new[] { "path", "file", "filePath", "target" },
+            "L'outil repo.write_file requiert un argument string 'path' (aliases acceptés: file,filePath,target).");
+        var content = ReadFirstString(arguments, new[] { "content", "text", "body", "value" },
+            "L'outil repo.write_file requiert un argument string 'content' (aliases acceptés: text,body,value).");
 
         var createDirs = true;
         if (arguments.RootElement.TryGetProperty("createDirs", out var createDirsElement) && createDirsElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
@@ -529,20 +539,21 @@ public sealed class RepoWriteFileTool : IAgentTool
         return (path, content, createDirs);
     }
 
-    private static string ReadRequiredString(JsonDocument arguments, string name, string error)
+    private static string ReadFirstString(JsonDocument arguments, string[] names, string error)
     {
-        if (!arguments.RootElement.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+        foreach (var name in names)
         {
-            throw new InvalidOperationException(error);
+            if (arguments.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String)
+            {
+                var value = element.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
         }
 
-        var value = element.GetString();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"L'argument '{name}' ne peut pas être vide.");
-        }
-
-        return value;
+        throw new InvalidOperationException(error);
     }
 }
 
