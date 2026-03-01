@@ -55,6 +55,40 @@ public sealed class RepoFileToolsTests
     }
 
     [Fact]
+    public async Task ListTree_ReturnsEntries()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, "src"));
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "src", "a.js"), "console.log('x');");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "README.md"), "# hi");
+
+            var tool = new RepoListTreeTool(tempDir);
+            using var args = JsonDocument.Parse("""{"path": ".", "recursive": true, "maxEntries": 10}""");
+            var result = await tool.InvokeAsync(CreateContext("c1", "repo.list_tree", args), CancellationToken.None);
+
+            using var payload = JsonDocument.Parse(result.Output);
+            Assert.Equal(".", payload.RootElement.GetProperty("path").GetString());
+            Assert.True(payload.RootElement.GetProperty("count").GetInt32() >= 2);
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
+    public async Task ListTree_DenyTraversal()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            var tool = new RepoListTreeTool(tempDir);
+            using var args = JsonDocument.Parse("""{"path":"../outside","recursive":false}""");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => tool.InvokeAsync(CreateContext("c1", "repo.list_tree", args), CancellationToken.None));
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
     public async Task WriteFile_WritesAndReturnsBytes()
     {
         var tempDir = CreateTempDir();

@@ -153,6 +153,120 @@ public sealed class RepoReadFileTool : IAgentTool
     }
 }
 
+public sealed class RepoListTreeTool : IAgentTool
+{
+    private const int DefaultMaxEntries = 300;
+    private const int MaxEntriesCap = 5000;
+
+    private static readonly JsonNode ParametersSchema = JsonNode.Parse("""
+    {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Dossier relatif à lister (défaut: racine)."
+        },
+        "maxEntries": {
+          "type": "integer",
+          "description": "Nombre max d'entrées à retourner. Défaut: 300, Max: 5000",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Lister récursivement. Défaut: true"
+        }
+      },
+      "additionalProperties": false
+    }
+    """)!;
+
+    private readonly RepoSandboxPathResolver _pathResolver;
+
+    public RepoListTreeTool(string repositoryRoot)
+    {
+        _pathResolver = new RepoSandboxPathResolver(repositoryRoot);
+        Definition = new ToolDefinition(
+            "repo.list_tree",
+            "Liste les fichiers/dossiers du dépôt (sandbox: chemins relatifs uniquement).",
+            ParametersSchema);
+    }
+
+    public string Name => Definition.Name;
+
+    public ToolDefinition Definition { get; }
+
+    public Task<AgentToolExecutionResult> InvokeAsync(ToolInvocationContext context, CancellationToken cancellationToken)
+    {
+        var (relativePath, maxEntries, recursive) = GetArguments(context.ToolCall.Arguments);
+        var effectiveRelativePath = string.IsNullOrWhiteSpace(relativePath) ? "." : relativePath!;
+        var fullPath = _pathResolver.Resolve(effectiveRelativePath);
+
+        if (!Directory.Exists(fullPath))
+        {
+            throw new InvalidOperationException($"Le dossier '{effectiveRelativePath}' est introuvable dans le dépôt.");
+        }
+
+        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var entries = Directory.EnumerateFileSystemEntries(fullPath, "*", option)
+            .Take(Math.Min(maxEntries, MaxEntriesCap))
+            .Select(p =>
+            {
+                var rel = Path.GetRelativePath(fullPath, p).Replace('\\', '/');
+                var kind = Directory.Exists(p) ? "dir" : "file";
+                return new { path = rel, kind };
+            })
+            .ToArray();
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            path = effectiveRelativePath,
+            recursive,
+            maxEntries = Math.Min(maxEntries, MaxEntriesCap),
+            count = entries.Length,
+            entries,
+        });
+
+        return Task.FromResult(new AgentToolExecutionResult(context.ToolCall.CallId, payload));
+    }
+
+    private static (string? Path, int MaxEntries, bool Recursive) GetArguments(JsonDocument arguments)
+    {
+        string? path = null;
+        if (arguments.RootElement.TryGetProperty("path", out var pathElement) && pathElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (pathElement.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException("L'argument 'path' doit être une string.");
+            }
+
+            path = pathElement.GetString();
+        }
+
+        var maxEntries = DefaultMaxEntries;
+        if (arguments.RootElement.TryGetProperty("maxEntries", out var maxEntriesElement) && maxEntriesElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (maxEntriesElement.ValueKind != JsonValueKind.Number || !maxEntriesElement.TryGetInt32(out maxEntries) || maxEntries < 1)
+            {
+                throw new InvalidOperationException("L'argument 'maxEntries' doit être un entier >= 1.");
+            }
+        }
+
+        var recursive = true;
+        if (arguments.RootElement.TryGetProperty("recursive", out var recursiveElement) && recursiveElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        {
+            if (recursiveElement.ValueKind != JsonValueKind.True && recursiveElement.ValueKind != JsonValueKind.False)
+            {
+                throw new InvalidOperationException("L'argument 'recursive' doit être un booléen.");
+            }
+
+            recursive = recursiveElement.GetBoolean();
+        }
+
+        return (path, maxEntries, recursive);
+    }
+}
+
 public sealed class RepoWriteFileTool : IAgentTool
 {
     private static readonly JsonNode ParametersSchema = JsonNode.Parse("""
@@ -306,7 +420,10 @@ internal sealed class RepoSandboxPathResolver
         var fullPath = Path.GetFullPath(Path.Combine(_repositoryRoot, relativePath));
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-        if (!fullPath.StartsWith(_repositoryRoot, comparison))
+        var rootWithoutTrailing = _repositoryRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var isRoot = string.Equals(fullPath, rootWithoutTrailing, comparison);
+
+        if (!isRoot && !fullPath.StartsWith(_repositoryRoot, comparison))
         {
             throw new InvalidOperationException("Le chemin demandé sort du sandbox du dépôt.");
         }
