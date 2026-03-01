@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,8 +16,9 @@ public sealed class AgentWorkflowManager
     private readonly Dictionary<string, IAgentTool> _tools = new(StringComparer.OrdinalIgnoreCase);
     private readonly int _maxTurns;
     private readonly AgentRetryPolicy _retryPolicy;
+    private readonly WorkflowRuntimeOptions _runtimeOptions;
 
-    public AgentWorkflowManager(int maxTurns = 8, AgentRetryPolicy? retryPolicy = null)
+    public AgentWorkflowManager(int maxTurns = 8, AgentRetryPolicy? retryPolicy = null, WorkflowRuntimeOptions? runtimeOptions = null)
     {
         if (maxTurns <= 0)
         {
@@ -25,6 +27,7 @@ public sealed class AgentWorkflowManager
 
         _maxTurns = maxTurns;
         _retryPolicy = retryPolicy ?? AgentRetryPolicy.Default;
+        _runtimeOptions = runtimeOptions ?? WorkflowRuntimeOptions.Default;
     }
 
     public void RegisterAgent(IAgent agent)
@@ -59,12 +62,21 @@ public sealed class AgentWorkflowManager
 
     private async Task<AgentWorkflowResult> RunAgentInternalAsync(IAgent agent, AgentRequest request, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var conversation = request.Messages.ToList();
         var availableTools = ResolveToolsForAgent(agent);
+        var metrics = new AgentWorkflowMetrics();
 
         for (var turn = 0; turn < _maxTurns; turn++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            metrics = new AgentWorkflowMetrics
+            {
+                Turns = turn + 1,
+                ToolCallsRequested = metrics.ToolCallsRequested,
+                ToolCallsSucceeded = metrics.ToolCallsSucceeded,
+                ToolCallsFailed = metrics.ToolCallsFailed,
+            };
 
             var runResult = await ExecuteWithRetryAsync(agent, conversation, availableTools, cancellationToken).ConfigureAwait(false);
 
@@ -75,14 +87,38 @@ public sealed class AgentWorkflowManager
 
             if (runResult.ToolCalls.Count == 0)
             {
-                return new AgentWorkflowResult(runResult.AssistantMessage, conversation);
+                stopwatch.Stop();
+                metrics = new AgentWorkflowMetrics
+                {
+                    Turns = metrics.Turns,
+                    ToolCallsRequested = metrics.ToolCallsRequested,
+                    ToolCallsSucceeded = metrics.ToolCallsSucceeded,
+                    ToolCallsFailed = metrics.ToolCallsFailed,
+                    DurationMs = stopwatch.ElapsedMilliseconds,
+                };
+                return new AgentWorkflowResult(runResult.AssistantMessage, conversation, metrics);
             }
+
+            IReadOnlyCollection<string> declaredAllowedTools = agent is IToolAwareAgent aware && aware.ToolNames.Count > 0
+                ? aware.ToolNames
+                : _tools.Keys.ToArray();
+
+            var allowedToolNames = new HashSet<string>(declaredAllowedTools, StringComparer.OrdinalIgnoreCase);
 
             var toolInvocationTasks = runResult.ToolCalls.Select(toolCall =>
             {
                 if (!_tools.TryGetValue(toolCall.Name, out var tool))
                 {
-                    throw new InvalidOperationException($"Tool '{toolCall.Name}' is not registered.");
+                    var missing = $"Tool '{toolCall.Name}' is not registered.";
+                    WorkflowLog.Error($"[Tool] missing callId={toolCall.CallId}: {missing}");
+                    return Task.FromResult(new AgentToolExecutionResult(toolCall.CallId, missing, isError: true));
+                }
+
+                if (!allowedToolNames.Contains(toolCall.Name))
+                {
+                    var denied = $"Tool '{toolCall.Name}' is not allowed for agent '{agent.Descriptor.Name}'.";
+                    WorkflowLog.Error($"[Tool] denied callId={toolCall.CallId}: {denied}");
+                    return Task.FromResult(new AgentToolExecutionResult(toolCall.CallId, denied, isError: true));
                 }
 
                 var context = new ToolInvocationContext(toolCall, CallAgentAsync);
@@ -90,6 +126,16 @@ public sealed class AgentWorkflowManager
             }).ToList();
 
             var toolResults = await Task.WhenAll(toolInvocationTasks).ConfigureAwait(false);
+
+            var succeeded = toolResults.Count(result => !result.IsError);
+            var failed = toolResults.Length - succeeded;
+            metrics = new AgentWorkflowMetrics
+            {
+                Turns = metrics.Turns,
+                ToolCallsRequested = metrics.ToolCallsRequested + runResult.ToolCalls.Count,
+                ToolCallsSucceeded = metrics.ToolCallsSucceeded + succeeded,
+                ToolCallsFailed = metrics.ToolCallsFailed + failed,
+            };
 
             foreach (var toolResult in toolResults)
             {
@@ -135,7 +181,13 @@ public sealed class AgentWorkflowManager
                     await Task.Delay(_retryPolicy.DelayBetweenAttempts, cancellationToken).ConfigureAwait(false);
                 }
 
-                return await agent.GenerateAsync(conversation, tools, cancellationToken).ConfigureAwait(false);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(_runtimeOptions.AgentTimeout);
+                return await agent.GenerateAsync(conversation, tools, timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                lastException = new TimeoutException($"Agent '{agent.Descriptor.Name}' timed out after {_runtimeOptions.AgentTimeout}.", ex);
             }
             catch (Exception ex) when (_retryPolicy.ShouldRetryOn(ex))
             {
@@ -158,16 +210,24 @@ public sealed class AgentWorkflowManager
         return new AgentRunResult(errorMessage, Array.Empty<AgentToolCall>());
     }
 
-    private static async Task<AgentToolExecutionResult> InvokeToolSafeAsync(IAgentTool tool, ToolInvocationContext context, CancellationToken cancellationToken)
+    private async Task<AgentToolExecutionResult> InvokeToolSafeAsync(IAgentTool tool, ToolInvocationContext context, CancellationToken cancellationToken)
     {
         try
         {
             var argumentsJson = context.ToolCall.Arguments.RootElement.GetRawText();
-            Console.WriteLine($"[Tool] Invoking '{tool.Name}' (callId={context.ToolCall.CallId}) with arguments: {argumentsJson}");
+            WorkflowLog.Debug($"[Tool] Invoking '{tool.Name}' (callId={context.ToolCall.CallId}) with arguments: {WorkflowLog.SafePayload(argumentsJson)}");
 
-            var result = await tool.InvokeAsync(context, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) returned (error={result.IsError}): {result.Output}");
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_runtimeOptions.ToolTimeout);
+            var result = await tool.InvokeAsync(context, timeoutCts.Token).ConfigureAwait(false);
+            WorkflowLog.Debug($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) returned (error={result.IsError}): {WorkflowLog.SafePayload(result.Output)}");
             return result;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            var timeoutMessage = $"Tool '{tool.Name}' timed out after {_runtimeOptions.ToolTimeout}.";
+            WorkflowLog.Error($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) timeout.");
+            return new AgentToolExecutionResult(context.ToolCall.CallId, timeoutMessage, isError: true);
         }
         catch (Exception ex)
         {
@@ -175,7 +235,7 @@ public sealed class AgentWorkflowManager
                 ? ex.Message
                 : $"Tool '{tool.Name}' failed: {ex.Message}";
 
-            Console.Error.WriteLine($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) threw: {ex}");
+            WorkflowLog.Error($"[Tool] '{tool.Name}' (callId={context.ToolCall.CallId}) threw: {ex.Message}");
             return new AgentToolExecutionResult(context.ToolCall.CallId, message, isError: true);
         }
     }
