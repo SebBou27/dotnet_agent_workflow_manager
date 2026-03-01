@@ -24,6 +24,17 @@ dotnet test AgentWorkflowManager.sln -c Debug
 dotnet run --project AgentWorkflowManager.Runner -- --prompt "Bonjour"
 ```
 
+Forcer l'agent en CLI (pratique CI):
+```bash
+dotnet run --project AgentWorkflowManager.Runner -- --prompt "Implémente X" --agent executor
+dotnet run --project AgentWorkflowManager.Runner -- --prompt "Planifie Y" --agent planner
+```
+
+Mode non-interactif via stdin (CI/pipes):
+```bash
+echo "Fais un plan de test" | dotnet run --project AgentWorkflowManager.Runner -- --stdin --agent planner
+```
+
 Mode interactif:
 ```bash
 dotnet run --project AgentWorkflowManager.Runner
