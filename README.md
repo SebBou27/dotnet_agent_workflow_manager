@@ -82,7 +82,7 @@ Exemple config:
 - `AWM_LOG_PAYLOADS` : `true|false` (par défaut recommandé: false)
 - `MCP_DIRECT_TEST=1` : mode test MCP direct
 
-## Tools fichiers (repo.list_tree / repo.read_file / repo.write_file)
+## Tools fichiers (repo.list_tree / repo.search / repo.read_file / repo.write_file)
 Le runner enregistre des tools locaux sandboxés sur la racine du dépôt.
 
 Configuration:
@@ -105,6 +105,16 @@ Arguments JSON:
 Retour JSON:
 ```json
 { "path":".", "recursive":true, "maxEntries":300, "count":2, "entries":[{"path":"src/app.js","kind":"file"}] }
+```
+
+### repo.search
+Arguments JSON:
+```json
+{ "query": "token", "path": "src", "caseSensitive": false, "maxResults": 100 }
+```
+Retour JSON:
+```json
+{ "query":"token", "path":"src", "maxResults":100, "truncated":false, "count":1, "results":[{"file":"a.js","line":1,"text":"const token = 'abc';"}] }
 ```
 
 ### repo.read_file

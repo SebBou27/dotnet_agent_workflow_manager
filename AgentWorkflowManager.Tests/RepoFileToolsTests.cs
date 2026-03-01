@@ -89,6 +89,40 @@ public sealed class RepoFileToolsTests
     }
 
     [Fact]
+    public async Task Search_ReturnsMatches()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, "src"));
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "src", "a.js"), "const token = 'abc';\nconsole.log(token);");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "src", "b.js"), "const value = 42;");
+
+            var tool = new RepoSearchTool(tempDir);
+            using var args = JsonDocument.Parse("""{"query":"token","path":"src","maxResults":10}""");
+            var result = await tool.InvokeAsync(CreateContext("c1", "repo.search", args), CancellationToken.None);
+
+            using var payload = JsonDocument.Parse(result.Output);
+            Assert.Equal("token", payload.RootElement.GetProperty("query").GetString());
+            Assert.True(payload.RootElement.GetProperty("count").GetInt32() >= 1);
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
+    public async Task Search_DenyTraversal()
+    {
+        var tempDir = CreateTempDir();
+        try
+        {
+            var tool = new RepoSearchTool(tempDir);
+            using var args = JsonDocument.Parse("""{"query":"x","path":"../outside"}""");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => tool.InvokeAsync(CreateContext("c1", "repo.search", args), CancellationToken.None));
+        }
+        finally { SafeDelete(tempDir); }
+    }
+
+    [Fact]
     public async Task WriteFile_WritesAndReturnsBytes()
     {
         var tempDir = CreateTempDir();
