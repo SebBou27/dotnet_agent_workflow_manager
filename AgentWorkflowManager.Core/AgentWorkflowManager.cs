@@ -80,11 +80,26 @@ public sealed class AgentWorkflowManager
                 return new AgentWorkflowResult(runResult.AssistantMessage, conversation);
             }
 
+            IReadOnlyCollection<string> declaredAllowedTools = agent is IToolAwareAgent aware && aware.ToolNames.Count > 0
+                ? aware.ToolNames
+                : _tools.Keys.ToArray();
+
+            var allowedToolNames = new HashSet<string>(declaredAllowedTools, StringComparer.OrdinalIgnoreCase);
+
             var toolInvocationTasks = runResult.ToolCalls.Select(toolCall =>
             {
                 if (!_tools.TryGetValue(toolCall.Name, out var tool))
                 {
-                    throw new InvalidOperationException($"Tool '{toolCall.Name}' is not registered.");
+                    var missing = $"Tool '{toolCall.Name}' is not registered.";
+                    WorkflowLog.Error($"[Tool] missing callId={toolCall.CallId}: {missing}");
+                    return Task.FromResult(new AgentToolExecutionResult(toolCall.CallId, missing, isError: true));
+                }
+
+                if (!allowedToolNames.Contains(toolCall.Name))
+                {
+                    var denied = $"Tool '{toolCall.Name}' is not allowed for agent '{agent.Descriptor.Name}'.";
+                    WorkflowLog.Error($"[Tool] denied callId={toolCall.CallId}: {denied}");
+                    return Task.FromResult(new AgentToolExecutionResult(toolCall.CallId, denied, isError: true));
                 }
 
                 var context = new ToolInvocationContext(toolCall, CallAgentAsync);

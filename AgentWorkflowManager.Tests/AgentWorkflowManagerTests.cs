@@ -64,6 +64,55 @@ public sealed class AgentWorkflowManagerTests
     }
 
     [Fact]
+    public async Task RunAgentAsync_ReturnsError_WhenToolNotAllowedForAgent()
+    {
+        var manager = new WorkflowManager(maxTurns: 4);
+
+        var restrictedAgent = new ToolAwareScriptedAgent(
+            "restricted",
+            new[]
+            {
+                AgentRunResultWithTool("assistant", "Trying forbidden tool", "forbidden_tool", "call-1", "{}"),
+                AgentRunResultWithMessage("assistant", "continuing"),
+            },
+            new[] { "allowed_tool" });
+
+        manager.RegisterAgent(restrictedAgent);
+        manager.RegisterTool(new FailingTestTool("forbidden_tool"));
+
+        var result = await manager.RunAgentAsync("restricted", new AgentRequest(new[] { AgentMessage.FromText("user", "test") }));
+
+        var toolMessage = result.Conversation.First(message => message.Role == "tool");
+        var toolContent = Assert.IsType<AgentToolResultContent>(toolMessage.Content.Single());
+        Assert.True(toolContent.IsError);
+        Assert.Contains("not allowed", toolContent.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunAgentAsync_ReturnsError_WhenToolNotRegistered()
+    {
+        var manager = new WorkflowManager(maxTurns: 4);
+
+        var primaryAgent = new ToolAwareScriptedAgent(
+            "primary",
+            new[]
+            {
+                AgentRunResultWithTool("assistant", "Call missing tool", "missing_tool", "call-1", "{}"),
+                AgentRunResultWithMessage("assistant", "continuing"),
+            },
+            new[] { "missing_tool" });
+
+        manager.RegisterAgent(primaryAgent);
+
+        var result = await manager.RunAgentAsync("primary", new AgentRequest(new[] { AgentMessage.FromText("user", "test") }));
+
+        var toolMessage = result.Conversation.First(message => message.Role == "tool");
+        var toolContent = Assert.IsType<AgentToolResultContent>(toolMessage.Content.Single());
+        Assert.True(toolContent.IsError);
+        Assert.Contains("not registered", toolContent.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RunAgentAsync_ContinuesWhenToolThrowsAndMarksError()
     {
         var manager = new WorkflowManager(maxTurns: 4);
