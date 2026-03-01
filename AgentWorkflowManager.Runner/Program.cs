@@ -9,6 +9,7 @@ using WorkflowManager = AgentWorkflowManager.Core.AgentWorkflowManager;
 
 var singlePrompt = GetSinglePrompt(args);
 var forcedAgent = GetForcedAgent(args);
+var stdinMode = HasFlag(args, "--stdin");
 var configuration = BuildConfiguration();
 
 try
@@ -100,7 +101,12 @@ try
 
     try
     {
-        if (!string.IsNullOrEmpty(singlePrompt))
+        if (stdinMode && string.IsNullOrWhiteSpace(singlePrompt))
+        {
+            singlePrompt = await Console.In.ReadToEndAsync().ConfigureAwait(false);
+        }
+
+        if (!string.IsNullOrWhiteSpace(singlePrompt))
         {
             var target = ResolveTargetAgent(forcedAgent, router, singlePrompt, plannerDescriptor.Name, executorDescriptor.Name);
             var session = GetOrCreateSession(target);
@@ -339,6 +345,9 @@ static string? GetForcedAgent(string[] args)
 
     return null;
 }
+
+static bool HasFlag(string[] args, string flag)
+    => args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
 
 static string ResolveTargetAgent(string? forcedAgent, RuleBasedAgentRouter router, string input, string plannerName, string executorName)
 {
