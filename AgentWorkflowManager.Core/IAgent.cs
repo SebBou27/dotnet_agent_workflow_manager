@@ -13,13 +13,25 @@ public interface IAgent
 
 public sealed class AgentWorkflowResult
 {
-    public AgentWorkflowResult(AgentMessage? finalMessage, IReadOnlyList<AgentMessage> conversation)
+    public AgentWorkflowResult(AgentMessage? finalMessage, IReadOnlyList<AgentMessage> conversation, AgentWorkflowMetrics? metrics = null)
     {
         FinalMessage = finalMessage;
         Conversation = conversation;
+        Metrics = metrics;
     }
 
     public AgentMessage? FinalMessage { get; }
 
     public IReadOnlyList<AgentMessage> Conversation { get; }
+
+    public AgentWorkflowMetrics? Metrics { get; }
+}
+
+public sealed class AgentWorkflowMetrics
+{
+    public int Turns { get; init; }
+    public int ToolCallsRequested { get; init; }
+    public int ToolCallsSucceeded { get; init; }
+    public int ToolCallsFailed { get; init; }
+    public long DurationMs { get; init; }
 }

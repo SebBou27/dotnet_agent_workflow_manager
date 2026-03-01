@@ -233,6 +233,11 @@ static async Task RunSinglePromptAsync(AgentSession session, string prompt)
         Console.WriteLine("(Pas de réponse)");
     }
 
+    if (result.Metrics is not null)
+    {
+        Console.WriteLine($"[metrics] turns={result.Metrics.Turns} tools={result.Metrics.ToolCallsRequested} ok={result.Metrics.ToolCallsSucceeded} err={result.Metrics.ToolCallsFailed} durationMs={result.Metrics.DurationMs}");
+    }
+
     if (result.Conversation.Any(message => message.Role == "tool"))
     {
         foreach (var toolMessage in result.Conversation.Where(m => m.Role == "tool"))

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,12 +62,21 @@ public sealed class AgentWorkflowManager
 
     private async Task<AgentWorkflowResult> RunAgentInternalAsync(IAgent agent, AgentRequest request, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var conversation = request.Messages.ToList();
         var availableTools = ResolveToolsForAgent(agent);
+        var metrics = new AgentWorkflowMetrics();
 
         for (var turn = 0; turn < _maxTurns; turn++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            metrics = new AgentWorkflowMetrics
+            {
+                Turns = turn + 1,
+                ToolCallsRequested = metrics.ToolCallsRequested,
+                ToolCallsSucceeded = metrics.ToolCallsSucceeded,
+                ToolCallsFailed = metrics.ToolCallsFailed,
+            };
 
             var runResult = await ExecuteWithRetryAsync(agent, conversation, availableTools, cancellationToken).ConfigureAwait(false);
 
@@ -77,7 +87,16 @@ public sealed class AgentWorkflowManager
 
             if (runResult.ToolCalls.Count == 0)
             {
-                return new AgentWorkflowResult(runResult.AssistantMessage, conversation);
+                stopwatch.Stop();
+                metrics = new AgentWorkflowMetrics
+                {
+                    Turns = metrics.Turns,
+                    ToolCallsRequested = metrics.ToolCallsRequested,
+                    ToolCallsSucceeded = metrics.ToolCallsSucceeded,
+                    ToolCallsFailed = metrics.ToolCallsFailed,
+                    DurationMs = stopwatch.ElapsedMilliseconds,
+                };
+                return new AgentWorkflowResult(runResult.AssistantMessage, conversation, metrics);
             }
 
             IReadOnlyCollection<string> declaredAllowedTools = agent is IToolAwareAgent aware && aware.ToolNames.Count > 0
@@ -107,6 +126,16 @@ public sealed class AgentWorkflowManager
             }).ToList();
 
             var toolResults = await Task.WhenAll(toolInvocationTasks).ConfigureAwait(false);
+
+            var succeeded = toolResults.Count(result => !result.IsError);
+            var failed = toolResults.Length - succeeded;
+            metrics = new AgentWorkflowMetrics
+            {
+                Turns = metrics.Turns,
+                ToolCallsRequested = metrics.ToolCallsRequested + runResult.ToolCalls.Count,
+                ToolCallsSucceeded = metrics.ToolCallsSucceeded + succeeded,
+                ToolCallsFailed = metrics.ToolCallsFailed + failed,
+            };
 
             foreach (var toolResult in toolResults)
             {
